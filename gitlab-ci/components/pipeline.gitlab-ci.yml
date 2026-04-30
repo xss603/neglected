@@ -1,0 +1,39 @@
+# Composable full pipeline — include this in projects and override variables
+
+include:
+  - local: templates/.build.gitlab-ci.yml
+  - local: templates/.test.gitlab-ci.yml
+  - local: templates/.deploy.gitlab-ci.yml
+  - local: templates/.notify.gitlab-ci.yml
+
+stages:
+  - test
+  - build
+  - deploy
+  - .post
+
+variables:
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+
+# Override these jobs in your project .gitlab-ci.yml:
+#
+# lint:
+#   extends: .test:lint:python
+#
+# unit-test:
+#   extends: .test:unit:python
+#   image: python:3.12
+#
+# build:
+#   extends: .build:kaniko
+#
+# deploy-staging:
+#   extends: .deploy:helm:staging
+#   variables:
+#     HELM_CHART: ./helm/my-app
+#
+# notify-success:
+#   extends: .notify:slack:success
+#
+# notify-failure:
+#   extends: .notify:slack:failure

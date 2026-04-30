@@ -1,0 +1,74 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: deploy
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: cicd-libs
+spec:
+  templates:
+    - name: helm-upgrade
+      inputs:
+        parameters:
+          - name: release-name
+          - name: chart
+          - name: namespace
+            value: default
+          - name: values-file
+            value: values.yaml
+          - name: set-args
+            value: ""
+          - name: timeout
+            value: 5m
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: alpine/helm:latest
+        command: [sh, -c]
+        args:
+          - |
+            helm upgrade --install {{inputs.parameters.release-name}} {{inputs.parameters.chart}} \
+              --namespace {{inputs.parameters.namespace}} \
+              --create-namespace \
+              --values /workspace/{{inputs.parameters.values-file}} \
+              --timeout {{inputs.parameters.timeout}} \
+              --wait \
+              {{inputs.parameters.set-args}}
+        workingDir: /workspace
+
+    - name: kubectl-apply
+      inputs:
+        parameters:
+          - name: namespace
+            value: default
+          - name: manifest-path
+            value: k8s/
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: bitnami/kubectl:latest
+        command: [sh, -c]
+        args:
+          - |
+            kubectl apply -f /workspace/{{inputs.parameters.manifest-path}} \
+              --namespace {{inputs.parameters.namespace}}
+        workingDir: /workspace
+
+    - name: rollback
+      inputs:
+        parameters:
+          - name: release-name
+          - name: namespace
+            value: default
+          - name: revision
+            value: "0"
+      container:
+        image: alpine/helm:latest
+        command: [sh, -c]
+        args:
+          - |
+            helm rollback {{inputs.parameters.release-name}} {{inputs.parameters.revision}} \
+              --namespace {{inputs.parameters.namespace}} \
+              --wait

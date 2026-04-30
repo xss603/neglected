@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: workflow-cleanup
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: cicd-libs
+spec:
+  schedule: "0 2 * * *"
+  timezone: UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 0
+  workflowSpec:
+    entrypoint: cleanup
+    serviceAccountName: argo-cleanup
+    templates:
+      - name: cleanup
+        steps:
+          - - name: delete-completed-workflows
+              template: delete-completed
+          - - name: delete-failed-workflows
+              template: delete-failed
+
+      - name: delete-completed
+        container:
+          image: argoproj/argocli:latest
+          command: [sh, -c]
+          args:
+            - |
+              argo delete --completed --older 72h -n argo
+
+      - name: delete-failed
+        container:
+          image: argoproj/argocli:latest
+          command: [sh, -c]
+          args:
+            - |
+              argo delete --field "status.phase=Failed" --older 168h -n argo

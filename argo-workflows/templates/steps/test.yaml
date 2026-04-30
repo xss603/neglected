@@ -1,0 +1,64 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: test-runner
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: cicd-libs
+spec:
+  templates:
+    - name: unit-test
+      inputs:
+        parameters:
+          - name: image
+          - name: command
+            value: "pytest"
+          - name: args
+            value: "--junitxml=/reports/junit.xml -v"
+        artifacts:
+          - name: source
+            path: /workspace
+      outputs:
+        artifacts:
+          - name: test-report
+            path: /reports
+            archive:
+              none: {}
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: [sh, -c]
+        args:
+          - "{{inputs.parameters.command}} {{inputs.parameters.args}}"
+        workingDir: /workspace
+
+    - name: lint
+      inputs:
+        parameters:
+          - name: image
+          - name: linter
+            value: "ruff check ."
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: "{{inputs.parameters.image}}"
+        command: [sh, -c]
+        args:
+          - "{{inputs.parameters.linter}}"
+        workingDir: /workspace
+
+    - name: security-scan
+      inputs:
+        parameters:
+          - name: image
+          - name: severity
+            value: "HIGH,CRITICAL"
+      container:
+        image: aquasec/trivy:latest
+        command: [trivy]
+        args:
+          - image
+          - --severity={{inputs.parameters.severity}}
+          - --exit-code=1
+          - --format=table
+          - "{{inputs.parameters.image}}"

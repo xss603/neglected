@@ -1,0 +1,50 @@
+# Example: Node.js service pipeline
+# Copy to your project root as .gitlab-ci.yml and adjust variables.
+
+include:
+  - project: 'your-group/neglected'
+    ref: main
+    file:
+      - gitlab-ci/templates/.build.gitlab-ci.yml
+      - gitlab-ci/templates/.test.gitlab-ci.yml
+      - gitlab-ci/templates/.deploy.gitlab-ci.yml
+      - gitlab-ci/templates/.notify.gitlab-ci.yml
+
+stages:
+  - test
+  - build
+  - deploy
+  - .post
+
+variables:
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  NODE_VERSION: "20"
+
+lint:
+  extends: .test:lint:node
+  image: node:$NODE_VERSION-alpine
+
+unit-test:
+  extends: .test:unit:node
+  image: node:$NODE_VERSION-alpine
+
+build:
+  extends: .build:docker
+  variables:
+    DOCKERFILE: Dockerfile
+    BUILD_ARGS: "--build-arg NODE_VERSION=$NODE_VERSION"
+
+deploy-staging:
+  extends: .deploy:helm:staging
+  variables:
+    HELM_CHART: ./helm/my-service
+    HELM_RELEASE: my-node-service-staging
+
+deploy-production:
+  extends: .deploy:helm:production
+  variables:
+    HELM_CHART: ./helm/my-service
+    HELM_RELEASE: my-node-service
+
+notify-failure:
+  extends: .notify:slack:failure

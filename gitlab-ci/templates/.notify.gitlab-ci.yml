@@ -1,0 +1,30 @@
+# Reusable notification job templates
+
+.notify:slack:success:
+  stage: .post
+  image: curlimages/curl:latest
+  when: on_success
+  variables:
+    SLACK_CHANNEL: "#deployments"
+    MESSAGE: "Pipeline succeeded for $CI_PROJECT_NAME @ $CI_COMMIT_SHORT_SHA"
+  script:
+    - |
+      curl -s -X POST \
+        -H "Authorization: Bearer $SLACK_TOKEN" \
+        -H "Content-type: application/json" \
+        --data "{\"channel\":\"$SLACK_CHANNEL\",\"text\":\":white_check_mark: $MESSAGE\"}" \
+        https://slack.com/api/chat.postMessage
+
+.notify:slack:failure:
+  extends: .notify:slack:success
+  when: on_failure
+  variables:
+    SLACK_CHANNEL: "#alerts"
+    MESSAGE: "Pipeline failed for $CI_PROJECT_NAME @ $CI_COMMIT_SHORT_SHA ($CI_PIPELINE_URL)"
+  script:
+    - |
+      curl -s -X POST \
+        -H "Authorization: Bearer $SLACK_TOKEN" \
+        -H "Content-type: application/json" \
+        --data "{\"channel\":\"$SLACK_CHANNEL\",\"text\":\":x: $MESSAGE\"}" \
+        https://slack.com/api/chat.postMessage

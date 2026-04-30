@@ -1,0 +1,115 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: ci-pipeline
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: cicd-libs
+    pipeline-type: ci
+spec:
+  entrypoint: ci
+  arguments:
+    parameters:
+      - name: repo
+      - name: branch
+        value: main
+      - name: image
+      - name: tag
+        value: latest
+      - name: test-image
+      - name: slack-channel
+        value: "#ci-notifications"
+
+  templates:
+    - name: ci
+      dag:
+        tasks:
+          - name: clone
+            templateRef:
+              name: git-clone
+              template: git-clone
+            arguments:
+              parameters:
+                - name: repo
+                  value: "{{workflow.parameters.repo}}"
+                - name: branch
+                  value: "{{workflow.parameters.branch}}"
+
+          - name: lint
+            depends: clone
+            templateRef:
+              name: test-runner
+              template: lint
+            arguments:
+              parameters:
+                - name: image
+                  value: "{{workflow.parameters.test-image}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.clone.outputs.artifacts.source}}"
+
+          - name: test
+            depends: clone
+            templateRef:
+              name: test-runner
+              template: unit-test
+            arguments:
+              parameters:
+                - name: image
+                  value: "{{workflow.parameters.test-image}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.clone.outputs.artifacts.source}}"
+
+          - name: build
+            depends: lint && test
+            templateRef:
+              name: docker-build
+              template: docker-build
+            arguments:
+              parameters:
+                - name: image
+                  value: "{{workflow.parameters.image}}"
+                - name: tag
+                  value: "{{workflow.parameters.tag}}"
+              artifacts:
+                - name: source
+                  from: "{{tasks.clone.outputs.artifacts.source}}"
+
+          - name: security-scan
+            depends: build
+            templateRef:
+              name: test-runner
+              template: security-scan
+            arguments:
+              parameters:
+                - name: image
+                  value: "{{workflow.parameters.image}}:{{workflow.parameters.tag}}"
+
+          - name: notify-success
+            depends: security-scan
+            templateRef:
+              name: notify
+              template: slack
+            arguments:
+              parameters:
+                - name: channel
+                  value: "{{workflow.parameters.slack-channel}}"
+                - name: message
+                  value: "CI passed for {{workflow.parameters.repo}} @ {{workflow.parameters.branch}}"
+                - name: status
+                  value: success
+
+          - name: notify-failure
+            depends: security-scan.Failed || test.Failed || lint.Failed || build.Failed
+            templateRef:
+              name: notify
+              template: slack
+            arguments:
+              parameters:
+                - name: channel
+                  value: "{{workflow.parameters.slack-channel}}"
+                - name: message
+                  value: "CI failed for {{workflow.parameters.repo}} @ {{workflow.parameters.branch}}"
+                - name: status
+                  value: failure

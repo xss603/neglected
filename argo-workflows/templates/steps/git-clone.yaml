@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: git-clone
+  namespace: argo
+  labels:
+    app.kubernetes.io/part-of: cicd-libs
+spec:
+  templates:
+    - name: git-clone
+      inputs:
+        parameters:
+          - name: repo
+          - name: branch
+            value: main
+          - name: depth
+            value: "1"
+        artifacts:
+          - name: source
+            path: /workspace
+            git:
+              repo: "{{inputs.parameters.repo}}"
+              revision: "{{inputs.parameters.branch}}"
+              depth: "{{inputs.parameters.depth}}"
+      outputs:
+        artifacts:
+          - name: source
+            path: /workspace
+      container:
+        image: alpine/git:latest
+        command: [sh, -c]
+        args:
+          - echo "Cloned {{inputs.parameters.repo}} @ {{inputs.parameters.branch}}"
+        workingDir: /workspace

@@ -1,0 +1,79 @@
+# Reusable test job templates
+
+.test:unit:
+  stage: test
+  variables:
+    JUNIT_REPORT: junit.xml
+    COVERAGE_REPORT: coverage.xml
+  script:
+    - echo "Override this script in your pipeline"
+  artifacts:
+    when: always
+    reports:
+      junit: "$JUNIT_REPORT"
+      coverage_report:
+        coverage_format: cobertura
+        path: "$COVERAGE_REPORT"
+    expire_in: 7 days
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+
+.test:unit:python:
+  extends: .test:unit
+  variables:
+    PYTEST_ARGS: "-v --junitxml=junit.xml --cov=. --cov-report=xml:coverage.xml"
+  script:
+    - pip install -r requirements.txt -r requirements-dev.txt
+    - pytest $PYTEST_ARGS
+
+.test:unit:node:
+  extends: .test:unit
+  variables:
+    NODE_ENV: test
+  before_script:
+    - npm ci
+  script:
+    - npm test -- --reporter=junit --reporter-option output=junit.xml
+
+.test:lint:python:
+  stage: test
+  script:
+    - pip install ruff
+    - ruff check .
+  allow_failure: false
+
+.test:lint:node:
+  stage: test
+  before_script:
+    - npm ci
+  script:
+    - npm run lint
+
+.test:security:trivy:
+  stage: test
+  image:
+    name: aquasec/trivy:latest
+    entrypoint: [""]
+  variables:
+    SEVERITY: "HIGH,CRITICAL"
+    IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+  script:
+    - trivy image --severity "$SEVERITY" --exit-code 1 "$IMAGE"
+  artifacts:
+    when: always
+    reports:
+      container_scanning: trivy-report.json
+    expire_in: 7 days
+
+.test:sast:
+  stage: test
+  image: semgrep/semgrep:latest
+  variables:
+    SEMGREP_CONFIG: "p/owasp-top-ten"
+  script:
+    - semgrep ci --config "$SEMGREP_CONFIG" --junit-xml-output semgrep.xml
+  artifacts:
+    when: always
+    reports:
+      junit: semgrep.xml
+    expire_in: 7 days
+  allow_failure: true

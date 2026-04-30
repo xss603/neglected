@@ -1,0 +1,76 @@
+# Reusable deploy job templates
+
+.deploy:helm:
+  stage: deploy
+  image: alpine/helm:latest
+  variables:
+    HELM_RELEASE: $CI_PROJECT_NAME
+    HELM_NAMESPACE: default
+    HELM_CHART: ""
+    HELM_VALUES_FILE: values.yaml
+    HELM_TIMEOUT: 5m
+    IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  before_script:
+    - helm version
+    - kubectl config use-context "$KUBE_CONTEXT"
+  script:
+    - |
+      helm upgrade --install "$HELM_RELEASE" "$HELM_CHART" \
+        --namespace "$HELM_NAMESPACE" \
+        --create-namespace \
+        --values "$HELM_VALUES_FILE" \
+        --set image.tag="$IMAGE_TAG" \
+        --timeout "$HELM_TIMEOUT" \
+        --wait \
+        --atomic
+
+.deploy:helm:staging:
+  extends: .deploy:helm
+  environment:
+    name: staging
+    url: https://staging.$CI_PROJECT_NAME.example.com
+  variables:
+    HELM_NAMESPACE: staging
+    HELM_VALUES_FILE: values-staging.yaml
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+.deploy:helm:production:
+  extends: .deploy:helm
+  environment:
+    name: production
+    url: https://$CI_PROJECT_NAME.example.com
+  variables:
+    HELM_NAMESPACE: production
+    HELM_VALUES_FILE: values-production.yaml
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+  when: manual
+
+.deploy:kubectl:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  variables:
+    MANIFEST_PATH: k8s/
+    KUBE_NAMESPACE: default
+  before_script:
+    - kubectl config use-context "$KUBE_CONTEXT"
+  script:
+    - kubectl apply -f "$MANIFEST_PATH" --namespace "$KUBE_NAMESPACE"
+    - kubectl rollout status -f "$MANIFEST_PATH" --namespace "$KUBE_NAMESPACE" --timeout=120s
+
+.deploy:argo-workflow:
+  stage: deploy
+  image: argoproj/argocli:latest
+  variables:
+    ARGO_NAMESPACE: argo
+    WORKFLOW_TEMPLATE: ""
+    ARGO_SERVER: ""
+  script:
+    - |
+      argo submit --from workflowtemplate/"$WORKFLOW_TEMPLATE" \
+        --namespace "$ARGO_NAMESPACE" \
+        --server "$ARGO_SERVER" \
+        --parameter "tag=$CI_COMMIT_SHORT_SHA" \
+        --wait \
+        --log

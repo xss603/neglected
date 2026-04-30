@@ -1,0 +1,66 @@
+# Reusable build job templates
+# Include: !reference or extends from this file
+
+.build:docker:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  variables:
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKERFILE: Dockerfile
+    BUILD_CONTEXT: "."
+    IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - |
+      docker build \
+        --cache-from "$CI_REGISTRY_IMAGE:latest" \
+        --build-arg BUILDKIT_INLINE_CACHE=1 \
+        -f "$DOCKERFILE" \
+        -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" \
+        -t "$CI_REGISTRY_IMAGE:latest" \
+        "$BUILD_CONTEXT"
+    - docker push "$CI_REGISTRY_IMAGE:$IMAGE_TAG"
+    - docker push "$CI_REGISTRY_IMAGE:latest"
+
+.build:docker:multi-arch:
+  extends: .build:docker
+  variables:
+    PLATFORMS: "linux/amd64,linux/arm64"
+  script:
+    - docker buildx create --use
+    - |
+      docker buildx build \
+        --platform "$PLATFORMS" \
+        --cache-from "$CI_REGISTRY_IMAGE:latest" \
+        -f "$DOCKERFILE" \
+        -t "$CI_REGISTRY_IMAGE:$IMAGE_TAG" \
+        -t "$CI_REGISTRY_IMAGE:latest" \
+        --push \
+        "$BUILD_CONTEXT"
+
+.build:kaniko:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  variables:
+    IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+    DOCKERFILE: Dockerfile
+    BUILD_CONTEXT: "."
+  script:
+    - mkdir -p /kaniko/.docker
+    - |
+      echo "{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$(echo -n $CI_REGISTRY_USER:$CI_REGISTRY_PASSWORD | base64)\"}}}" \
+        > /kaniko/.docker/config.json
+    - |
+      /kaniko/executor \
+        --context "$BUILD_CONTEXT" \
+        --dockerfile "$DOCKERFILE" \
+        --destination "$CI_REGISTRY_IMAGE:$IMAGE_TAG" \
+        --destination "$CI_REGISTRY_IMAGE:latest" \
+        --cache=true \
+        --cache-ttl=24h
