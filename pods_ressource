@@ -1,0 +1,1 @@
+kubectl get pod <pod-name> -n <namespace> -o jsonpath='{range .spec.containers[*]}{.name}{"\t"}{.resources.requests}{"\t"}{.resources.limits}{"\n"}{end}'
