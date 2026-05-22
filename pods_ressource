@@ -1,1 +1,25 @@
 kubectl get pod <pod-name> -n <namespace> -o jsonpath='{range .spec.containers[*]}{.name}{"\t"}{.resources.requests}{"\t"}{.resources.limits}{"\n"}{end}'
+
+
+
+# Sum lines ending with Mi
+awk '/^[0-9]+Mi$/ {sum += $1+0} END {print sum "Mi"}' <<'EOF'
+200Mi
+8000Mi
+invalid
+123
+EOF
+# Output: 8200Mi
+
+
+
+
+# Sum lines with plain numbers OR ending with m
+awk '/^[0-9]+m?$/ {sum += ($1 ~ /m$/) ? ($1+0) : ($1*1000)} END {print sum "m"}' <<'EOF'
+1
+555m
+2
+invalid
+abc
+EOF
+# Output: 3555m (1 core = 1000m + 555m + 2 cores = 2000m)
