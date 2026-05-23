@@ -9,42 +9,71 @@ import sys
 import json
 import subprocess
 from collections import defaultdict
-from typing import Dict, List, Any
+from typing import Dict, Any, Union
 
-def parse_cpu(value: str) -> float:
+def parse_cpu(value: Union[str, int, float, None]) -> float:
     """Convert CPU string to millicores."""
-    if not value:
+    if value is None or value == "":
         return 0.0
     if isinstance(value, (int, float)):
         return float(value) * 1000
-    value = str(value)
-    if value.endswith('m'):
-        return float(value[:-1])
-    return float(value) * 1000
+    
+    value = str(value).strip()
+    if not value or value == "0":
+        return 0.0
+    
+    try:
+        if value.endswith('m'):
+            return float(value[:-1])
+        else:
+            return float(value) * 1000
+    except ValueError:
+        print(f"Warning: Invalid CPU value '{value}', defaulting to 0", file=sys.stderr)
+        return 0.0
 
-def parse_memory(value: str) -> int:
+def parse_memory(value: Union[str, int, float, None]) -> int:
     """Convert memory string to bytes."""
-    if not value:
+    if value is None or value == "":
         return 0
     if isinstance(value, (int, float)):
         return int(value)
-    value = str(value)
+    
+    value = str(value).strip()
+    if not value or value == "0":
+        return 0
     
     units = {
         'Ki': 1024,
         'Mi': 1024**2,
         'Gi': 1024**3,
         'Ti': 1024**4,
+        'Pi': 1024**5,
         'k': 1000,
         'M': 1000**2,
         'G': 1000**3,
         'T': 1000**4,
+        'P': 1000**5,
     }
     
-    for suffix, multiplier in units.items():
-        if value.endswith(suffix):
-            return int(float(value[:-len(suffix)]) * multiplier)
-    return int(value)
+    try:
+        for suffix, multiplier in units.items():
+            if value.endswith(suffix):
+                num_part = value[:-len(suffix)]
+                return int(float(num_part) * multiplier)
+        return int(float(value))
+    except ValueError:
+        print(f"Warning: Invalid memory value '{value}', defaulting to 0", file=sys.stderr)
+        return 0
+
+def parse_gpu(value: Union[str, int, float, None]) -> float:
+    """Convert GPU count to float."""
+    if value is None or value == "":
+        return 0.0
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        print(f"Warning: Invalid GPU value '{value}', defaulting to 0", file=sys.stderr)
+        return 0.0
 
 def get_container_resources(container: Dict) -> Dict[str, float]:
     """Extract resources from a container spec."""
@@ -53,17 +82,17 @@ def get_container_resources(container: Dict) -> Dict[str, float]:
     limits = resources.get('limits', {})
     
     return {
-        'cpu_req': parse_cpu(requests.get('cpu', '0')),
-        'cpu_lim': parse_cpu(limits.get('cpu', '0')),
-        'mem_req': parse_memory(requests.get('memory', '0')),
-        'mem_lim': parse_memory(limits.get('memory', '0')),
-        'gpu_req': float(requests.get('nvidia.com/gpu', 0)),
-        'gpu_lim': float(limits.get('nvidia.com/gpu', 0)),
+        'cpu_req': parse_cpu(requests.get('cpu')),
+        'cpu_lim': parse_cpu(limits.get('cpu')),
+        'mem_req': parse_memory(requests.get('memory')),
+        'mem_lim': parse_memory(limits.get('memory')),
+        'gpu_req': parse_gpu(requests.get('nvidia.com/gpu')),
+        'gpu_lim': parse_gpu(limits.get('nvidia.com/gpu')),
     }
 
 def get_pod_resources(pod: Dict) -> Dict[str, float]:
     """Sum resources across all containers in a pod."""
-    totals = {'cpu_req': 0, 'cpu_lim': 0, 'mem_req': 0, 'mem_lim': 0, 'gpu_req': 0, 'gpu_lim': 0}
+    totals = {'cpu_req': 0.0, 'cpu_lim': 0.0, 'mem_req': 0, 'mem_lim': 0, 'gpu_req': 0.0, 'gpu_lim': 0.0}
     
     for container in pod.get('spec', {}).get('containers', []):
         res = get_container_resources(container)
@@ -146,7 +175,7 @@ def main():
     
     # Calculate totals
     print("--- Resource Summary ---")
-    totals = {'cpu_req': 0, 'cpu_lim': 0, 'mem_req': 0, 'mem_lim': 0, 'gpu_req': 0, 'gpu_lim': 0}
+    totals = {'cpu_req': 0.0, 'cpu_lim': 0.0, 'mem_req': 0, 'mem_lim': 0, 'gpu_req': 0.0, 'gpu_lim': 0.0}
     
     for pod in filtered_pods:
         res = get_pod_resources(pod)
@@ -170,7 +199,7 @@ def main():
     # By namespace
     print()
     print("--- By Namespace ---")
-    ns_stats = defaultdict(lambda: {'pods': 0, 'cpu': 0, 'mem': 0})
+    ns_stats = defaultdict(lambda: {'pods': 0, 'cpu': 0.0, 'mem': 0})
     
     for pod in filtered_pods:
         ns = pod['metadata']['namespace']
