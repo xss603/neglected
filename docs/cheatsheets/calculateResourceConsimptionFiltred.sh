@@ -1,19 +1,19 @@
 #!/bin/bash
-# calculate-node-resources-filtered.sh
+# calculate-node-resources-exclude-ns.sh
 # Calculates total resource requests/limits for all pods running on a specific node,
-# with optional regex-based pod name filtering (excluded pods are ignored).
-# Usage: ./scripts/calculate-node-resources-filtered.sh <node-name> [exclude-regex]
-# Example: ./scripts/calculate-node-resources-filtered.sh kind-control-plane "^app-"
-# Example: ./scripts/calculate-node-resources-filtered.sh kind-control-plane "apps-demo.*"
+# excluding an entire namespace from the calculation.
+# Usage: ./scripts/calculate-node-resources-exclude-ns.sh <node-name> <namespace-to-exclude>
+# Example: ./scripts/calculate-node-resources-exclude-ns.sh kind-control-plane kube-system
+# Example: ./scripts/calculate-node-resources-exclude-ns.sh kind-control-plane sparrow-tooling
 
 set -euo pipefail
 
 NODE_NAME="${1:-}"
-EXCLUDE_REGEX="${2:-}"
+EXCLUDE_NS="${2:-}"
 
-if [ -z "$NODE_NAME" ]; then
-    echo "Usage: $0 <node-name> [exclude-regex]"
-    echo "Example: $0 kind-control-plane 'apps-demo.*'"
+if [ -z "$NODE_NAME" ] || [ -z "$EXCLUDE_NS" ]; then
+    echo "Usage: $0 <node-name> <namespace-to-exclude>"
+    echo "Example: $0 kind-control-plane kube-system"
     exit 1
 fi
 
@@ -22,17 +22,20 @@ if [ -n "${KUBECONFIG:-}" ]; then
     KUBECTL="kubectl --kubeconfig=$KUBECONFIG"
 fi
 
-echo "=== Node Resource Calculator (Filtered) ==="
+echo "=== Node Resource Calculator (Namespace Excluded) ==="
 echo "Node: $NODE_NAME"
-if [ -n "$EXCLUDE_REGEX" ]; then
-    echo "Excluding pods matching regex: $EXCLUDE_REGEX"
-fi
+echo "Excluded namespace: $EXCLUDE_NS"
 echo ""
 
 # Verify node exists
 if ! $KUBECTL get node "$NODE_NAME" > /dev/null 2>&1; then
     echo "Error: Node '$NODE_NAME' not found"
     exit 1
+fi
+
+# Verify namespace exists (warn if not)
+if ! $KUBECTL get namespace "$EXCLUDE_NS" > /dev/null 2>&1; then
+    echo "Warning: Namespace '$EXCLUDE_NS' not found — will proceed but nothing will be excluded"
 fi
 
 # Get node capacity
@@ -49,25 +52,24 @@ $KUBECTL get node "$NODE_NAME" -o json | jq -r '
 echo ""
 echo "--- Fetching pods on node ---"
 
+TMPDIR=$(mktemp -d)
+trap "rm -rf $TMPDIR" EXIT
+
 # Get all pods scheduled on this node
-PODS_JSON=$($KUBECTL get pods --all-namespaces --field-selector spec.nodeName="$NODE_NAME" -o json)
+$KUBECTL get pods --all-namespaces --field-selector spec.nodeName="$NODE_NAME" -o json > "$TMPDIR/pods.json"
 
-# Apply regex filter in jq
-FILTERED_JSON=$(echo "$PODS_JSON" | jq --arg regex "$EXCLUDE_REGEX" '
-    if $regex != "" then
-        .items |= map(select(.metadata.name | test($regex) | not))
-    else
-        .
-    end
-')
+# Apply namespace filter in jq
+jq --arg ns "$EXCLUDE_NS" '
+    .items |= map(select(.metadata.namespace != $ns))
+' "$TMPDIR/pods.json" > "$TMPDIR/filtered.json"
 
-TOTAL_PODS=$(echo "$PODS_JSON" | jq '.items | length')
-FILTERED_PODS=$(echo "$FILTERED_JSON" | jq '.items | length')
+TOTAL_PODS=$(jq '.items | length' "$TMPDIR/pods.json")
+FILTERED_PODS=$(jq '.items | length' "$TMPDIR/filtered.json")
 EXCLUDED_COUNT=$((TOTAL_PODS - FILTERED_PODS))
 
 echo "Total pods: $TOTAL_PODS"
 if [ "$EXCLUDED_COUNT" -gt 0 ]; then
-    echo "Excluded by regex: $EXCLUDED_COUNT"
+    echo "Excluded namespace: $EXCLUDE_NS ($EXCLUDED_COUNT pods)"
 fi
 echo "Pods counted: $FILTERED_PODS"
 echo ""
@@ -79,17 +81,17 @@ fi
 
 # Show excluded pod names
 if [ "$EXCLUDED_COUNT" -gt 0 ]; then
-    echo "--- Excluded Pods ---"
-    echo "$PODS_JSON" | jq --arg regex "$EXCLUDE_REGEX" -r '
-        .items[] | select(.metadata.name | test($regex)) |
-        "  - \(.metadata.name) (\(.metadata.namespace))"
-    '
+    echo "--- Excluded Pods (from '$EXCLUDE_NS') ---"
+    jq --arg ns "$EXCLUDE_NS" -r '
+        .items[] | select(.metadata.namespace == $ns) |
+        "  - \(.metadata.name)"
+    ' "$TMPDIR/pods.json"
     echo ""
 fi
 
 # Calculate totals using jq
 echo "--- Resource Summary ---"
-echo "$FILTERED_JSON" | jq -r '
+jq -r '
 def to_millicores:
     if . == null then 0
     elif type == "string" then
@@ -153,11 +155,11 @@ if .gpu_req > 0 or .gpu_lim > 0 then
     "GPU Limits:         \(.gpu_lim)",
     ""
 else empty end
-'
+' "$TMPDIR/filtered.json"
 
 echo ""
 echo "--- Breakdown by Namespace ---"
-echo "$FILTERED_JSON" | jq -r '
+jq -r '
 def to_millicores:
     if . == null then 0
     elif type == "string" then
@@ -188,11 +190,11 @@ group_by(.metadata.namespace) |
     mem: ([.[] | .spec.containers[]?.resources.requests.memory | to_bytes] | add // 0)
 } |
 "\(.ns)\t\(.pods) pods\t\(.cpu / 1000 * 10 | floor / 10) cores\t\(.mem / 1024 / 1024 | floor) MiB"
-'
+' "$TMPDIR/filtered.json"
 
 echo ""
 echo "--- Breakdown by Pod (Top 10 by CPU request) ---"
-echo "$FILTERED_JSON" | jq -r '
+jq -r '
 def to_millicores:
     if . == null then 0
     elif type == "string" then
@@ -225,7 +227,7 @@ reverse |
 .[0:10] |
 .[] |
 "\(.name)\t\(.ns)\t\(.cpu) m\t\(.mem | floor) MiB"
-'
+' "$TMPDIR/filtered.json"
 
 echo ""
 echo "=== Done ==="
