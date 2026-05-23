@@ -87,8 +87,8 @@ def to_millicores:
     if . == null or . == "" then 0
     elif type == "number" then (. * 1000)
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber)
-        else (tonumber * 1000)
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0)
+        else (try tonumber catch 0 * 1000)
         end
     else 0
     end;
@@ -97,15 +97,15 @@ def to_bytes:
     if . == null or . == "" then 0
     elif type == "number" then .
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber / 1000)
-        elif endswith("Ki") then (rtrimstr("Ki") | tonumber * 1024)
-        elif endswith("Mi") then (rtrimstr("Mi") | tonumber * 1024 * 1024)
-        elif endswith("Gi") then (rtrimstr("Gi") | tonumber * 1024 * 1024 * 1024)
-        elif endswith("Ti") then (rtrimstr("Ti") | tonumber * 1024 * 1024 * 1024 * 1024)
-        elif endswith("k")  then (rtrimstr("k") | tonumber * 1000)
-        elif endswith("M")  then (rtrimstr("M") | tonumber * 1000 * 1000)
-        elif endswith("G")  then (rtrimstr("G") | tonumber * 1000 * 1000 * 1000)
-        else tonumber
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0 / 1000)
+        elif endswith("Ki") then (rtrimstr("Ki") | try tonumber catch 0 * 1024)
+        elif endswith("Mi") then (rtrimstr("Mi") | try tonumber catch 0 * 1024 * 1024)
+        elif endswith("Gi") then (rtrimstr("Gi") | try tonumber catch 0 * 1024 * 1024 * 1024)
+        elif endswith("Ti") then (rtrimstr("Ti") | try tonumber catch 0 * 1024 * 1024 * 1024 * 1024)
+        elif endswith("k")  then (rtrimstr("k") | try tonumber catch 0 * 1000)
+        elif endswith("M")  then (rtrimstr("M") | try tonumber catch 0 * 1000 * 1000)
+        elif endswith("G")  then (rtrimstr("G") | try tonumber catch 0 * 1000 * 1000 * 1000)
+        else (try tonumber catch 0)
         end
     else 0
     end;
@@ -157,8 +157,8 @@ def to_millicores:
     if . == null or . == "" then 0
     elif type == "number" then (. * 1000)
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber)
-        else (tonumber * 1000)
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0)
+        else (try tonumber catch 0 * 1000)
         end
     else 0
     end;
@@ -167,11 +167,11 @@ def to_bytes:
     if . == null or . == "" then 0
     elif type == "number" then .
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber / 1000)
-        elif endswith("Ki") then (rtrimstr("Ki") | tonumber * 1024)
-        elif endswith("Mi") then (rtrimstr("Mi") | tonumber * 1024 * 1024)
-        elif endswith("Gi") then (rtrimstr("Gi") | tonumber * 1024 * 1024 * 1024)
-        else tonumber
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0 / 1000)
+        elif endswith("Ki") then (rtrimstr("Ki") | try tonumber catch 0 * 1024)
+        elif endswith("Mi") then (rtrimstr("Mi") | try tonumber catch 0 * 1024 * 1024)
+        elif endswith("Gi") then (rtrimstr("Gi") | try tonumber catch 0 * 1024 * 1024 * 1024)
+        else (try tonumber catch 0)
         end
     else 0
     end;
@@ -203,8 +203,8 @@ def to_millicores:
     if . == null or . == "" then 0
     elif type == "number" then (. * 1000)
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber)
-        else (tonumber * 1000)
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0)
+        else (try tonumber catch 0 * 1000)
         end
     else 0
     end;
@@ -213,11 +213,11 @@ def to_mib:
     if . == null or . == "" then 0
     elif type == "number" then (. / 1024 / 1024)
     elif type == "string" then
-        if endswith("m") then (rtrimstr("m") | tonumber / 1000 / 1024 / 1024)
-        elif endswith("Ki") then (rtrimstr("Ki") | tonumber / 1024)
-        elif endswith("Mi") then (rtrimstr("Mi") | tonumber)
-        elif endswith("Gi") then (rtrimstr("Gi") | tonumber * 1024)
-        else (tonumber / 1024 / 1024)
+        if endswith("m") then (rtrimstr("m") | try tonumber catch 0 / 1000 / 1024 / 1024)
+        elif endswith("Ki") then (rtrimstr("Ki") | try tonumber catch 0 / 1024)
+        elif endswith("Mi") then (rtrimstr("Mi") | try tonumber catch 0)
+        elif endswith("Gi") then (rtrimstr("Gi") | try tonumber catch 0 * 1024)
+        else (try tonumber catch 0 / 1024 / 1024)
         end
     else 0
     end;
