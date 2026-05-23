@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # calculate-node-resources-exclude-ns.sh
-# Calculates total resource requests/limits for all pods on a node,
-# excluding one namespace.
+# Calculates resource requests/limits for pods on a node, excluding one namespace.
 # Usage: ./scripts/calculate-node-resources-exclude-ns.sh <node-name> <namespace-to-exclude>
 
 set -euo pipefail
 
 NODE_NAME="${1:-}"
 EXCLUDE_NS="${2:-}"
+DEBUG="${DEBUG:-0}"
 
 if [[ -z "$NODE_NAME" || -z "$EXCLUDE_NS" ]]; then
     echo "Usage: $0 <node-name> <namespace-to-exclude>"
@@ -23,7 +23,6 @@ echo "Node:         $NODE_NAME"
 echo "Exclude NS:   $EXCLUDE_NS"
 echo ""
 
-# Verify node exists
 if ! $KUBECTL get node "$NODE_NAME" &>/dev/null; then
     echo "Error: Node '$NODE_NAME' not found"
     exit 1
@@ -45,7 +44,17 @@ echo "--- Fetching pods ---"
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-$KUBECTL get pods --all-namespaces --field-selector "spec.nodeName=$NODE_NAME" -o json > "$TMPDIR/all.json"
+$KUBECTL get pods --all-namespaces --field-selector "spec.nodeName=$NODE_NAME" -o json > "$TMPDIR/all.json" 2>&1 || {
+    echo "Error: kubectl failed to fetch pods"
+    exit 1
+}
+
+# Validate JSON before jq touches it
+if ! jq empty "$TMPDIR/all.json" 2>/dev/null; then
+    echo "Error: kubectl produced invalid JSON"
+    [[ "$DEBUG" == "1" ]] && cat "$TMPDIR/all.json" | head -5
+    exit 1
+fi
 
 TOTAL=$(jq '.items | length' "$TMPDIR/all.json")
 EXCLUDED=$(jq --arg ns "$EXCLUDE_NS" '[.items[] | select(.metadata.namespace == $ns)] | length' "$TMPDIR/all.json")
@@ -54,24 +63,24 @@ REMAINING=$((TOTAL - EXCLUDED))
 echo "  Total pods:     $TOTAL"
 echo "  Excluded:       $EXCLUDED ($EXCLUDE_NS)"
 echo "  Counted:        $REMAINING"
+[[ "$DEBUG" == "1" ]] && echo "  Temp dir:       $TMPDIR"
 echo ""
 
-if [[ "$REMAINING" -eq 0 ]]; then
-    echo "No pods to calculate after exclusion."
-    exit 0
-fi
+[[ "$REMAINING" -eq 0 ]] && { echo "No pods to calculate after exclusion."; exit 0; }
 
-# Show excluded pod names
 if [[ "$EXCLUDED" -gt 0 ]]; then
     echo "--- Excluded pods ---"
     jq -r --arg ns "$EXCLUDE_NS" '.items[] | select(.metadata.namespace == $ns) | "  - \(.metadata.name)"' "$TMPDIR/all.json"
     echo ""
 fi
 
-# Filter out excluded namespace
+# Filter: safe jq JSON → JSON transform
 jq --arg ns "$EXCLUDE_NS" '.items |= map(select(.metadata.namespace != $ns))' "$TMPDIR/all.json" > "$TMPDIR/filtered.json"
 
-# Calculate totals using a clean jq pipeline
+# Validate filtered JSON too
+jq empty "$TMPDIR/filtered.json" 2>/dev/null || { echo "Error: filtered JSON is invalid"; exit 1; }
+
+# ── Resource Summary ──
 echo "--- Resource Summary ---"
 jq -r '
 def to_millicores:
@@ -94,7 +103,7 @@ def to_bytes:
         elif endswith("k")  then (.[:-1] | tonumber * 1000)
         elif endswith("M")  then (.[:-1] | tonumber * 1000 * 1000)
         elif endswith("G")  then (.[:-1] | tonumber * 1000 * 1000 * 1000)
-        else (tonumber)
+        else tonumber
         end
     elif type == "number" then .
     else 0
@@ -117,12 +126,12 @@ def pod_res:
 map(. + {_res: pod_res}) |
 {
     pods: length,
-    cpu_req:  (map(._res.cpu_req) | add),
-    cpu_lim:  (map(._res.cpu_lim) | add),
-    mem_req:  (map(._res.mem_req) | add),
-    mem_lim:  (map(._res.mem_lim) | add),
-    gpu_req:  (map(._res.gpu_req) | add),
-    gpu_lim:  (map(._res.gpu_lim) | add)
+    cpu_req:  (map(._res.cpu_req)  | add),
+    cpu_lim:  (map(._res.cpu_lim)  | add),
+    mem_req:  (map(._res.mem_req)  | add),
+    mem_lim:  (map(._res.mem_lim)  | add),
+    gpu_req:  (map(._res.gpu_req)  | add),
+    gpu_lim:  (map(._res.gpu_lim)  | add)
 } |
 "  Pods:           \(.pods)",
 "",
@@ -139,6 +148,7 @@ if .gpu_req > 0 or .gpu_lim > 0 then
 else empty end
 ' "$TMPDIR/filtered.json"
 
+# ── By Namespace ──
 echo ""
 echo "--- By Namespace ---"
 jq -r '
@@ -163,10 +173,7 @@ def to_bytes:
     end;
 
 def container_res:
-    {
-        cpu_req: ((.resources.requests.cpu // "0") | to_millicores),
-        mem_req: ((.resources.requests.memory // "0") | to_bytes)
-    };
+    { cpu_req: ((.resources.requests.cpu // "0") | to_millicores), mem_req: ((.resources.requests.memory // "0") | to_bytes) };
 
 def pod_res:
     (.spec.containers // []) | map(container_res) | add // {cpu_req:0,mem_req:0};
@@ -184,6 +191,7 @@ group_by(.metadata.namespace) |
 "  \(.ns)\t\(.pods) pods\t\(.cpu / 1000) cores\t\(.mem / 1024 / 1024 | floor) MiB"
 ' "$TMPDIR/filtered.json"
 
+# ── Top 10 Pods ──
 echo ""
 echo "--- Top 10 Pods by CPU Request ---"
 jq -r '
@@ -208,24 +216,14 @@ def to_mib:
     end;
 
 def container_res:
-    {
-        cpu_req: ((.resources.requests.cpu // "0") | to_millicores),
-        mem_req: ((.resources.requests.memory // "0") | to_mib)
-    };
+    { cpu_req: ((.resources.requests.cpu // "0") | to_millicores), mem_req: ((.resources.requests.memory // "0") | to_mib) };
 
 def pod_res:
     (.spec.containers // []) | map(container_res) | add // {cpu_req:0,mem_req:0};
 
 .items |
-map({
-    name: .metadata.name,
-    ns: .metadata.namespace,
-    cpu: pod_res.cpu_req,
-    mem: pod_res.mem_req
-}) |
-sort_by(.cpu) |
-reverse |
-.[0:10] |
+map({ name: .metadata.name, ns: .metadata.namespace, cpu: pod_res.cpu_req, mem: pod_res.mem_req }) |
+sort_by(.cpu) | reverse | .[0:10] |
 .[] |
 "  \(.name)\t\(.ns)\t\(.cpu) m\t\(.mem | floor) MiB"
 ' "$TMPDIR/filtered.json"
