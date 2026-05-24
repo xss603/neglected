@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # calculate-node-current-usage.sh
 # Counts current ACTUAL resource consumption (usage) of pods on a node,
-# not requests/limits. Requires metrics-server.
+# not requests/limits. Uses kubectl top pods.
 # Usage: ./scripts/calculate-node-current-usage.sh <node-name> <namespace-to-exclude>
 
 set -euo pipefail
@@ -55,36 +55,35 @@ echo "  Counted:        $REMAINING"
 [[ "$DEBUG" == "1" ]] && echo "  Temp dir:       $TMPDIR"
 echo ""
 
-# ── Fetch metrics ──
-echo "--- Fetching metrics ---"
-$KUBECTL get --raw /apis/metrics.k8s.io/v1beta1/pods 2>/dev/null > "$TMPDIR/metrics.json" || {
-    echo "Error: Metrics API not available."
+# ── Fetch metrics via kubectl top ──
+echo "--- Fetching metrics (kubectl top) ---"
+$KUBECTL top pods --all-namespaces --no-headers > "$TMPDIR/top.txt" 2>&1 || {
+    echo "Error: kubectl top failed."
     echo ""
-    echo "  Install metrics-server:"
-    echo "    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml"
-    echo ""
-    echo "  For kind clusters, add --kubelet-insecure-tls flag:"
-    echo "    kubectl patch -n kube-system deployment metrics-server --type=json \\"
-    echo "      -p='[{\"op\":\"add\",\"path\":\"/spec/template/spec/containers/0/args/-\",\"value\":\"--kubelet-insecure-tls\"}]'"
+    echo "  Metrics-server may not be installed or ready."
     echo ""
     exit 1
 }
 
-if ! jq empty "$TMPDIR/metrics.json" 2>/dev/null; then
-    echo "Error: Metrics API returned invalid JSON"
-    [[ "$DEBUG" == "1" ]] && cat "$TMPDIR/metrics.json" | head -5
-    exit 1
-fi
-
-METRICS_COUNT=$(jq '.items | length' "$TMPDIR/metrics.json")
-echo "  Metrics pods:   $METRICS_COUNT"
+TOP_COUNT=$(wc -l < "$TMPDIR/top.txt" | tr -d ' ')
+echo "  Metrics rows:   $TOP_COUNT"
 echo ""
 
 [[ "$REMAINING" -eq 0 ]] && { echo "No pods to calculate after exclusion."; exit 0; }
 
+# ── Convert top text to JSON ──
+# kubectl top output: NAMESPACE  NAME  CPU(cores)  MEMORY(bytes)
+# Parse with jq -R, filter empty strings from split
+cat "$TMPDIR/top.txt" | jq -R -s '
+  split("\n") |
+  map(split(" ") | map(select(. != ""))) |
+  map(select(length >= 4)) |
+  map({ ns: .[0], name: .[1], cpu: .[2], mem: .[3] })
+' > "$TMPDIR/top.json"
+
 # ── Resource Summary ──
 echo "--- Current Usage Summary ---"
-jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/metrics.json" <<'JQEOF'
+jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/top.json" <<'JQEOF'
 
 def to_millicores:
     if . == null or . == "" then 0
@@ -126,27 +125,30 @@ def to_mib:
     else 0
     end;
 
-# Build lookup: namespace/name -> pod metadata
+# Build lookup: namespace/name -> true (for pods on target node, not excluded)
 ($pods[0].items // []) |
 map(select(.spec.nodeName == $node and .metadata.namespace != $exclude)) |
-map({ key: "\(.metadata.namespace)/\(.metadata.name)", value: .metadata }) |
+map({ key: "\(.metadata.namespace)/\(.metadata.name)", value: true }) |
 from_entries as $pod_lookup |
 
-# Filter metrics to only pods on this node (excluding namespace)
-(.items // []) |
-map(select("\(.metadata.namespace)/\(.metadata.name)" | in($pod_lookup))) |
-map(. + {
-    _cpu:  ([.containers[]?.usage.cpu    // "0" | to_millicores] | add // 0),
-    _mem:  ([.containers[]?.usage.memory // "0" | to_bytes]     | add // 0),
-    _mem_mib: ([.containers[]?.usage.memory // "0" | to_mib] | add // 0)
-}) as $usage |
-
-# Totals
+# Filter top metrics to pods on this node
+(.[] // []) |
+select("\(.ns)/\(.name)" | in($pod_lookup)) |
 {
-    pods:  ($usage | length),
-    cpu:   ($usage | map(._cpu) | add // 0),
-    mem:   ($usage | map(._mem) | add // 0),
-    mem_mib: ($usage | map(._mem_mib) | add // 0)
+    name: .name,
+    ns: .ns,
+    cpu: (.cpu | to_millicores),
+    mem: (.mem | to_bytes),
+    mem_mib: (.mem | to_mib)
+} as $items |
+
+# Collect into array for aggregation
+[ $items ] |
+{
+    pods: length,
+    cpu:  (map(.cpu) | add // 0),
+    mem:  (map(.mem) | add // 0),
+    mem_mib: (map(.mem_mib) | add // 0)
 } |
 "  Pods with metrics:  \(.pods)",
 "",
@@ -159,7 +161,7 @@ JQEOF
 # ── By Namespace ──
 echo ""
 echo "--- By Namespace ---"
-jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/metrics.json" <<'JQEOF'
+jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/top.json" <<'JQEOF'
 
 def to_millicores:
     if . == null or . == "" then 0
@@ -189,19 +191,20 @@ map(select(.spec.nodeName == $node and .metadata.namespace != $exclude)) |
 map({ key: "\(.metadata.namespace)/\(.metadata.name)", value: .metadata.namespace }) |
 from_entries as $ns_lookup |
 
-(.items // []) |
-map(select("\(.metadata.namespace)/\(.metadata.name)" | in($ns_lookup))) |
-map(. + {
-    _cpu:  ([.containers[]?.usage.cpu    // "0" | to_millicores] | add // 0),
-    _mem:  ([.containers[]?.usage.memory // "0" | to_mib]      | add // 0)
-}) |
-group_by($ns_lookup["\(.metadata.namespace)/\(.metadata.name)"]) |
+(.[] // []) |
+select("\(.ns)/\(.name)" | in($ns_lookup)) |
+{
+    ns: .ns,
+    cpu: (.cpu | to_millicores),
+    mem: (.mem | to_mib)
+} |
+group_by(.ns) |
 .[] |
 {
-    ns: .[0].metadata.namespace,
+    ns: .[0].ns,
     pods: length,
-    cpu: (map(._cpu) | add),
-    mem: (map(._mem) | add)
+    cpu: (map(.cpu) | add),
+    mem: (map(.mem) | add)
 } |
 "  \(.ns)\t\(.pods) pods\t\(.cpu / 1000) cores\t\(.mem | floor) MiB"
 JQEOF
@@ -209,7 +212,7 @@ JQEOF
 # ── Top 10 Pods by CPU ──
 echo ""
 echo "--- Top 10 Pods by CPU Usage ---"
-jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/metrics.json" <<'JQEOF'
+jq --slurpfile pods "$TMPDIR/pods.json" --arg node "$NODE_NAME" --arg exclude "$EXCLUDE_NS" -r -n -f - "$TMPDIR/top.json" <<'JQEOF'
 
 def to_millicores:
     if . == null or . == "" then 0
@@ -239,13 +242,12 @@ map(select(.spec.nodeName == $node and .metadata.namespace != $exclude)) |
 map({ key: "\(.metadata.namespace)/\(.metadata.name)", value: true }) |
 from_entries as $pod_lookup |
 
-(.items // []) |
-map(select("\(.metadata.namespace)/\(.metadata.name)" | in($pod_lookup))) |
+[ (.[] // []) | select("\(.ns)/\(.name)" | in($pod_lookup)) ] |
 map({
-    name: .metadata.name,
-    ns: .metadata.namespace,
-    cpu: ([.containers[]?.usage.cpu    // "0" | to_millicores] | add // 0),
-    mem: ([.containers[]?.usage.memory // "0" | to_mib]      | add // 0)
+    name: .name,
+    ns: .ns,
+    cpu: (.cpu | to_millicores),
+    mem: (.mem | to_mib)
 }) |
 sort_by(.cpu) | reverse | .[0:10] |
 .[] |
