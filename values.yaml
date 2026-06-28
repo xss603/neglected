@@ -1,0 +1,70 @@
+grafana:
+  enabled: true
+  adminPassword: admin
+  tolerations:
+    - key: "zone"
+      operator: "Equal"
+      value: "local"
+      effect: "NoSchedule"
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+  grafana.ini:
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    tolerations:
+      - key: "zone"
+        operator: "Equal"
+        value: "local"
+        effect: "NoSchedule"
+
+kubeStateMetrics:
+  enabled: true
+
+kube-state-metrics:
+  tolerations:
+    - key: "zone"
+      operator: "Equal"
+      value: "local"
+      effect: "NoSchedule"
+
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  tolerations:
+    - key: "zone"
+      operator: "Equal"
+      value: "local"
+      effect: "NoSchedule"
+
+prometheusOperator:
+  tolerations:
+    - key: "zone"
+      operator: "Equal"
+      value: "local"
+      effect: "NoSchedule"
+  admissionWebhooks:
+    patch:
+      tolerations:
+        - key: "zone"
+          operator: "Equal"
+          value: "local"
+          effect: "NoSchedule"
+
+alertmanager:
+  alertmanagerSpec:
+    tolerations:
+      - key: "zone"
+        operator: "Equal"
+        value: "local"
+        effect: "NoSchedule"
