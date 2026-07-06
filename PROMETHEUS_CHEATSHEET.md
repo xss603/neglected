@@ -142,3 +142,35 @@ node_instance (hidden) → label_values(node_uname_info{nodename=~"$tainted_node
 | Table panels | Enable **Instant** toggle — returns one row per series instead of samples over time |
 | Instant vs time series | Instant → table/stat/gauge. Time series → timeseries panel |
 | `label_values` scope | Add a `match[]` metric to scope label discovery, e.g. `label_values(kube_node_spec_taint{key="zone"}, value)` |
+
+---
+
+## Ingress — local kind cluster
+
+```
+# /etc/hosts (add once with sudo)
+127.0.0.1  grafana.local  prometheus.local  alertmanager.local
+```
+
+```bash
+# Start the ingress port-forward (kind has no extraPortMappings)
+kubectl port-forward svc/ingress-nginx-controller 8080:80 -n ingress-nginx
+```
+
+| URL | Service |
+|-----|---------|
+| http://grafana.local:8080 | Grafana (admin / admin) |
+| http://prometheus.local:8080 | Prometheus |
+| http://alertmanager.local:8080 | Alertmanager |
+
+> For a persistent setup, recreate the kind cluster with extraPortMappings:
+> ```yaml
+> kind: Cluster
+> apiVersion: kind.x-k8s.io/v1alpha4
+> nodes:
+>   - role: control-plane
+>     extraPortMappings:
+>       - containerPort: 80
+>         hostPort: 80
+>         protocol: TCP
+> ```
