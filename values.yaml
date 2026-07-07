@@ -1,70 +1,82 @@
-grafana:
-  enabled: true
-  adminPassword: admin
-  tolerations:
-    - key: "zone"
-      operator: "Equal"
-      value: "local"
-      effect: "NoSchedule"
-  sidecar:
-    dashboards:
-      enabled: true
-      label: grafana_dashboard
-      labelValue: "1"
-      searchNamespace: ALL
-  grafana.ini:
-    auth.anonymous:
-      enabled: true
-      org_role: Viewer
+# values.yaml — single source of truth for the grafana-stack Timoni module.
+#
+# Apply with:
+#   timoni apply grafana-stack ./modules/stack \
+#     --namespace default \
+#     --values values.yaml
+#
+# Or dry-run to preview manifests:
+#   timoni build grafana-stack ./modules/stack --values values.yaml
 
-prometheus:
-  prometheusSpec:
+# ── Global ─────────────────────────────────────────────────────────────────────
+toleration:
+  key: zone
+  operator: Equal
+  value: local
+  effect: NoSchedule
+
+# ── Monitoring (kube-prometheus-stack ingress + Grafana dashboards) ────────────
+monitoring:
+  enabled: true
+  namespace: monitoring
+  helmRelease: kube-prom   # must match the Helm release name used in install.sh
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}        # extra nginx annotations, e.g. auth, rate-limit
+
+  grafana:
+    host: grafana.local
+    servicePort: 80
+
+  prometheus:
+    host: prometheus.local
+    servicePort: 9090
+
+  alertmanager:
+    host: alertmanager.local
+    servicePort: 9093
+
+  dashboards:
+    enabled: true
+    sidecarLabel: grafana_dashboard
+    sidecarValue: "1"
+
+  # Forwarded verbatim to helm upgrade --set / --values by install.sh
+  helm:
+    grafanaAdminPassword: admin
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
-    tolerations:
-      - key: "zone"
-        operator: "Equal"
-        value: "local"
-        effect: "NoSchedule"
 
-kubeStateMetrics:
+# ── MinIO (dual instance + optional migration) ────────────────────────────────
+minio:
   enabled: true
+  namespace: minio
 
-kube-state-metrics:
-  tolerations:
-    - key: "zone"
-      operator: "Equal"
-      value: "local"
-      effect: "NoSchedule"
+  instance1:
+    name: minio1
+    rootUser: minio1admin
+    rootPassword: minio1secret
+    storage: 2Gi
+    apiPort: 9000
+    consolePort: 9001
+    buckets: [logs, configs, backups]
 
-nodeExporter:
-  enabled: true
+  instance2:
+    name: minio2
+    rootUser: minio2admin
+    rootPassword: minio2secret
+    storage: 2Gi
+    apiPort: 9000
+    consolePort: 9001
+    buckets: [logs, configs, backups]
 
-prometheus-node-exporter:
-  tolerations:
-    - key: "zone"
-      operator: "Equal"
-      value: "local"
-      effect: "NoSchedule"
-
-prometheusOperator:
-  tolerations:
-    - key: "zone"
-      operator: "Equal"
-      value: "local"
-      effect: "NoSchedule"
-  admissionWebhooks:
-    patch:
-      tolerations:
-        - key: "zone"
-          operator: "Equal"
-          value: "local"
-          effect: "NoSchedule"
-
-alertmanager:
-  alertmanagerSpec:
-    tolerations:
-      - key: "zone"
-        operator: "Equal"
-        value: "local"
-        effect: "NoSchedule"
+  migrate:
+    # Flip to true to emit the migration Job (mc mirror instance1 → instance2).
+    enabled: false
+    image: minio/mc:latest
+    bucketPairs:
+      - [logs,    logs]
+      - [configs, configs]
+      - [backups, backups]
