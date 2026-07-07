@@ -1,12 +1,13 @@
 # values.yaml — single source of truth for the grafana-stack Timoni module.
 #
-# Apply with:
-#   timoni apply grafana-stack ./modules/stack \
-#     --namespace default \
-#     --values values.yaml
+# Use the provided wrapper which converts YAML → CUE on the fly
+# (timoni v0.26 has a known bug with YAML --values, CUE is always used internally):
 #
-# Or dry-run to preview manifests:
-#   timoni build grafana-stack ./modules/stack --values values.yaml
+#   ./timoni.sh build grafana-stack ./modules/stack --output yaml
+#   ./timoni.sh apply grafana-stack ./modules/stack
+#
+# To use a custom values file:
+#   VALUES=my-overrides.yaml ./timoni.sh apply grafana-stack ./modules/stack
 
 # ── Global ─────────────────────────────────────────────────────────────────────
 toleration:

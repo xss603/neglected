@@ -9,13 +9,17 @@ _instanceName:      string | *"grafana-stack" @tag(name)
 _instanceNamespace: string | *"default"       @tag(namespace)
 _moduleVersion:     string | *"0.1.0"         @tag(mv, var=moduleVersion)
 
+// _config merges user overrides (values) with module defaults (#Config).
+// Because timoni REPLACES the values field with the --values file content,
+// defaults must not live in values.cue — they come from #Config's | *default fields.
+_config: templates.#Config & values
+
 timoni: {
 	apiVersion: "v1alpha1"
 
 	instance: templates.#Instance & {
-		config: values
+		config: _config
 	}
 
-	// objects is already a list — assign directly without a for-in-struct iteration.
 	apply: app: timoni.instance.objects
 }
