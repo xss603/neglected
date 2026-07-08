@@ -1,7 +1,7 @@
 # values.yaml — single source of truth for the grafana-stack Timoni module.
 #
 # Use the provided wrapper which converts YAML → CUE on the fly
-# (timoni v0.26 has a known bug with YAML --values, CUE is always used internally):
+# (timoni v0.26 has a known bug with YAML --values; CUE is always used internally):
 #
 #   ./timoni.sh build grafana-stack ./modules/stack --output yaml
 #   ./timoni.sh apply grafana-stack ./modules/stack
@@ -9,7 +9,7 @@
 # To use a custom values file:
 #   VALUES=my-overrides.yaml ./timoni.sh apply grafana-stack ./modules/stack
 
-# ── Global ─────────────────────────────────────────────────────────────────────
+# ── Global toleration (applied to every managed workload) ─────────────────────
 toleration:
   key: zone
   operator: Equal
@@ -20,64 +20,187 @@ toleration:
 monitoring:
   enabled: true
   namespace: monitoring
-  helmRelease: kube-prom   # must match the Helm release name used in install.sh
+  # Must match the Helm release name used in install.sh
+  helmRelease: kube-prom
 
   ingress:
     enabled: true
     className: nginx
-    annotations: {}        # extra nginx annotations, e.g. auth, rate-limit
+    # Extra annotations merged into every Ingress object.
+    # Example: {"nginx.ingress.kubernetes.io/auth-type": "basic", ...}
+    annotations: {}
+    # Shared TLS settings — one Secret covers all three monitoring hostnames.
+    tls:
+      enabled: false
+      secretName: ""          # e.g. monitoring-tls (must exist before apply)
+    grafana:
+      host: grafana.local
+      port: 80
+    prometheus:
+      host: prometheus.local
+      port: 9090
+    alertmanager:
+      host: alertmanager.local
+      port: 9093
 
-  grafana:
-    host: grafana.local
-    servicePort: 80
-
-  prometheus:
-    host: prometheus.local
-    servicePort: 9090
-
-  alertmanager:
-    host: alertmanager.local
-    servicePort: 9093
-
+  # Dashboard ConfigMaps discovered by the Grafana sidecar.
   dashboards:
     enabled: true
     sidecarLabel: grafana_dashboard
     sidecarValue: "1"
 
-  # Forwarded verbatim to helm upgrade --set / --values by install.sh
+  # Values forwarded to kube-prometheus-stack by install.sh.
   helm:
+    # Grafana
     grafanaAdminPassword: admin
+    grafanaReplicas: 1
+    grafanaResources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      # limits:
+      #   cpu: "500m"
+      #   memory: "512Mi"
+    grafanaPersistence:
+      enabled: false
+      size: 1Gi
+      storageClass: ""        # empty = cluster default
+    grafanaPlugins: []        # e.g. [grafana-piechart-panel, grafana-clock-panel]
+
+    # Prometheus
+    prometheusReplicas: 1
+    prometheusRetention: 30d
+    prometheusResources:
+      requests:
+        cpu: "200m"
+        memory: "400Mi"
+    prometheusStorage:
+      enabled: false
+      size: 10Gi
+      storageClass: ""
+
+    # Alertmanager
+    alertmanagerReplicas: 1
+    alertmanagerResources: {}
+
+    # Selector settings — false = scrape all ServiceMonitors / PodMonitors.
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
 
-# ── MinIO (dual instance + optional migration) ────────────────────────────────
+# ── MinIO (dual instance + optional data migration) ───────────────────────────
 minio:
   enabled: true
   namespace: minio
 
   instance1:
+    enabled: true
     name: minio1
+    # Credentials — use ExternalSecret / Vault in production.
     rootUser: minio1admin
     rootPassword: minio1secret
+    # Image
+    image: quay.io/minio/minio:latest
+    imagePullPolicy: IfNotPresent
+    # Storage
     storage: 2Gi
+    storageClass: ""          # empty = cluster default
+    # Ports
     apiPort: 9000
     consolePort: 9001
+    # Replicas (>1 requires distributed-mode storage)
+    replicas: 1
+    serviceType: ClusterIP
+    # Resource requests / limits
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+    # Arbitrary extra env vars injected into the container.
+    extraEnv: {}              # e.g. {MINIO_BROWSER_REDIRECT_URL: "https://console.minio1.local"}
+    # Bucket names to pre-create.
     buckets: [logs, configs, backups]
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 5
 
   instance2:
+    enabled: true
     name: minio2
     rootUser: minio2admin
     rootPassword: minio2secret
+    image: quay.io/minio/minio:latest
+    imagePullPolicy: IfNotPresent
     storage: 2Gi
+    storageClass: ""
     apiPort: 9000
     consolePort: 9001
+    replicas: 1
+    serviceType: ClusterIP
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "256Mi"
+    extraEnv: {}
     buckets: [logs, configs, backups]
+    readinessProbe:
+      enabled: true
+      initialDelaySeconds: 10
+      periodSeconds: 5
 
+  # Optional ingress for MinIO web consoles.
+  ingress:
+    enabled: false
+    className: nginx
+    annotations: {}
+    tls:
+      enabled: false
+      secretName: ""
+    instance1:
+      host: minio1.local
+      port: 9001
+    instance2:
+      host: minio2.local
+      port: 9001
+
+  # Data migration — mc mirror instance1 → instance2.
   migrate:
-    # Flip to true to emit the migration Job (mc mirror instance1 → instance2).
     enabled: false
     image: minio/mc:latest
+    resources: {}
+    # Pairs: [source-bucket, destination-bucket]
     bucketPairs:
       - [logs,    logs]
       - [configs, configs]
       - [backups, backups]
+    # Run mc diff after mirroring to verify data integrity.
+    verify: true
+
+# ── Argo Workflows (controller/server installed via argo-helm; see install.sh) ─
+argoWorkflows:
+  enabled: true
+  namespace: argo
+  helmRelease: argo-workflows
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations: {}
+    tls:
+      enabled: false
+      secretName: ""
+    server:
+      host: argo.local
+      port: 2746
+
+  workflows:
+    # Mirrors minio.instance1 buckets to minio.instance2 using mc, as a
+    # native Argo DAG (parallel mirror steps + a verify step).
+    minioPipeline:
+      enabled: true
+      name: minio-artifact-pipeline
+      mcImage: minio/mc:latest
+      bucketPairs:
+        - [logs,    logs]
+        - [configs, configs]
+        - [backups, backups]

@@ -45,8 +45,9 @@ PYEOF
 }
 
 # Build a temp CUE file, pipe to timoni via --values
-TMP_CUE=$(mktemp /tmp/timoni-values-XXXXXX.cue)
-trap 'rm -f "$TMP_CUE"' EXIT
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
+TMP_CUE="$TMP_DIR/values.cue"
 
 _yaml_to_cue > "$TMP_CUE"
 

@@ -1,28 +1,39 @@
 package templates
 
-// _monitoringObjects returns a struct of monitoring Kubernetes resources derived from config.
-// Fields are conditionally present based on enabled flags.
+// #Monitoring builds all monitoring-stack Kubernetes objects from config.
 #Monitoring: {
 	_cfg: #Config
 
-	// Derived service names from Helm release convention
-	_grafanaSvc:      "\(_cfg.monitoring.helmRelease)-grafana"
-	_promSvc:         "\(_cfg.monitoring.helmRelease)-kube-prometheus-prometheus"
-	_alertSvc:        "\(_cfg.monitoring.helmRelease)-kube-prometheus-alertmanager"
+	// Derived service names from Helm release convention.
+	_grafanaSvc:  "\(_cfg.monitoring.helmRelease)-grafana"
+	_promSvc:     "\(_cfg.monitoring.helmRelease)-kube-prometheus-prometheus"
+	_alertSvc:    "\(_cfg.monitoring.helmRelease)-kube-prometheus-alertmanager"
 
 	_ingressAnnotations: {
 		"nginx.ingress.kubernetes.io/rewrite-target": "/"
 	} & _cfg.monitoring.ingress.annotations
 
-	// Namespace
+	// ── Namespace ─────────────────────────────────────────────────────────────
 	monitoring_namespace: {
 		apiVersion: "v1"
 		kind:       "Namespace"
 		metadata: name: _cfg.monitoring.namespace
 	}
 
-	// Ingress objects — present only when ingress.enabled
+	// ── Ingress objects (conditional on ingress.enabled) ──────────────────────
 	if _cfg.monitoring.ingress.enabled {
+		_ingressTLS: []
+		if _cfg.monitoring.ingress.tls.enabled {
+			_ingressTLS: [{
+				hosts: [
+					_cfg.monitoring.ingress.grafana.host,
+					_cfg.monitoring.ingress.prometheus.host,
+					_cfg.monitoring.ingress.alertmanager.host,
+				]
+				secretName: _cfg.monitoring.ingress.tls.secretName
+			}]
+		}
+
 		ingress_grafana: {
 			apiVersion: "networking.k8s.io/v1"
 			kind:       "Ingress"
@@ -33,14 +44,15 @@ package templates
 			}
 			spec: {
 				ingressClassName: _cfg.monitoring.ingress.className
+				if _cfg.monitoring.ingress.tls.enabled { tls: _ingressTLS }
 				rules: [{
-					host: _cfg.monitoring.grafana.host
+					host: _cfg.monitoring.ingress.grafana.host
 					http: paths: [{
 						path:     "/"
 						pathType: "Prefix"
 						backend: service: {
 							name: _grafanaSvc
-							port: number: _cfg.monitoring.grafana.servicePort
+							port: number: _cfg.monitoring.ingress.grafana.port
 						}
 					}]
 				}]
@@ -57,14 +69,15 @@ package templates
 			}
 			spec: {
 				ingressClassName: _cfg.monitoring.ingress.className
+				if _cfg.monitoring.ingress.tls.enabled { tls: _ingressTLS }
 				rules: [{
-					host: _cfg.monitoring.prometheus.host
+					host: _cfg.monitoring.ingress.prometheus.host
 					http: paths: [{
 						path:     "/"
 						pathType: "Prefix"
 						backend: service: {
 							name: _promSvc
-							port: number: _cfg.monitoring.prometheus.servicePort
+							port: number: _cfg.monitoring.ingress.prometheus.port
 						}
 					}]
 				}]
@@ -81,14 +94,15 @@ package templates
 			}
 			spec: {
 				ingressClassName: _cfg.monitoring.ingress.className
+				if _cfg.monitoring.ingress.tls.enabled { tls: _ingressTLS }
 				rules: [{
-					host: _cfg.monitoring.alertmanager.host
+					host: _cfg.monitoring.ingress.alertmanager.host
 					http: paths: [{
 						path:     "/"
 						pathType: "Prefix"
 						backend: service: {
 							name: _alertSvc
-							port: number: _cfg.monitoring.alertmanager.servicePort
+							port: number: _cfg.monitoring.ingress.alertmanager.port
 						}
 					}]
 				}]
@@ -96,7 +110,7 @@ package templates
 		}
 	}
 
-	// Dashboard ConfigMaps — present only when dashboards.enabled
+	// ── Dashboard ConfigMaps (picked up by Grafana sidecar) ───────────────────
 	if _cfg.monitoring.dashboards.enabled {
 		_label: {"\(_cfg.monitoring.dashboards.sidecarLabel)": _cfg.monitoring.dashboards.sidecarValue}
 

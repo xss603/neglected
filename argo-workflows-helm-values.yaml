@@ -1,0 +1,43 @@
+# Helm values for the argo-helm `argo-workflows` chart.
+# Tolerations mirror values.yaml's global `toleration` block (zone=local:NoSchedule)
+# so controller/server/CRD-install/workflow pods can schedule on this cluster's
+# tainted node. Ingress is disabled here — the argo-server Ingress is managed
+# by argo-workflows.yaml / the Timoni module instead.
+_tol: &tol
+  - key: zone
+    operator: Equal
+    value: local
+    effect: NoSchedule
+
+crds:
+  # Use minified CRDs bundled in the chart instead of downloading full CRDs
+  # from raw.githubusercontent.com at install time (avoids GitHub rate-limit
+  # flakiness on repeated/CI installs).
+  full: false
+  upgradeJob:
+    tolerations: *tol
+
+controller:
+  tolerations: *tol
+  # Applied as spec defaults to every Workflow the controller runs, so
+  # workflow step pods (e.g. minio-artifact-pipeline) also tolerate the taint
+  # and run as the "argo-workflow" SA (RBAC to report workflowtaskresults —
+  # the "default" SA lacks this and every step fails with a 403).
+  workflowDefaults:
+    spec:
+      tolerations: *tol
+      serviceAccountName: argo-workflow
+
+# Actually create the "argo-workflow" ServiceAccount that workflow.rbac
+# already binds a Role to (rbac.create defaults to true, but the SA itself
+# is not created unless this is set).
+workflow:
+  serviceAccount:
+    create: true
+
+server:
+  tolerations: *tol
+  extraArgs:
+    - --auth-mode=server
+  ingress:
+    enabled: false

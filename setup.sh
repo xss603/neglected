@@ -341,7 +341,45 @@ $all_ok && success "Migration complete — all objects verified" \
          || die    "Migration had errors — check output above"
 
 # ============================================================================
-step "8 / 8  Access summary"
+step "8 / 9  Argo Workflows"
+# ============================================================================
+
+NAMESPACE_ARGO=argo
+ARGO_PORT=2746
+
+helm repo add argo https://argoproj.github.io/argo-helm &>/dev/null || true
+helm repo update argo &>/dev/null
+
+kubectl create namespace "$NAMESPACE_ARGO" --dry-run=client -o yaml | kubectl apply -f - &>/dev/null
+
+helm upgrade --install argo-workflows argo/argo-workflows \
+  --namespace "$NAMESPACE_ARGO" \
+  -f "$SCRIPT_DIR/argo-workflows-helm-values.yaml" \
+  --timeout 5m \
+  --atomic
+success "argo-workflows installed"
+
+wait_rollout deployment argo-workflows-server     "$NAMESPACE_ARGO"
+wait_rollout deployment argo-workflows-controller "$NAMESPACE_ARGO"
+
+kubectl apply -f "$SCRIPT_DIR/argo-workflows.yaml"
+success "argo namespace, ingress, and minio-artifact-pipeline workflow applied"
+
+if ! grep -q "argo.local" /etc/hosts 2>/dev/null; then
+  warn "/etc/hosts missing — run once to enable browser access:"
+  echo -e "  ${BOLD}sudo sh -c 'echo \"127.0.0.1  argo.local\" >> /etc/hosts'${RESET}"
+fi
+
+info "Waiting for minio-artifact-pipeline to finish"
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
+  workflow/minio-artifact-pipeline -n "$NAMESPACE_ARGO" --timeout=3m \
+  && success "minio-artifact-pipeline Succeeded" \
+  || warn    "minio-artifact-pipeline did not reach Succeeded — check: kubectl get workflow -n $NAMESPACE_ARGO"
+
+port_forward_bg argo-workflows-server "$ARGO_PORT" 2746 "$NAMESPACE_ARGO"
+
+# ============================================================================
+step "9 / 9  Access summary"
 # ============================================================================
 
 cat <<EOF
@@ -368,7 +406,15 @@ ${BOLD}Useful mc commands${RESET}
   mc diff minio1/backups minio2/backups     # diff instances
   mc mirror --watch minio1/logs minio2/logs # live replication
 
+${BOLD}Argo Workflows${RESET}
+  UI            http://localhost:${ARGO_PORT}
+  UI            http://argo.local:${INGRESS_PORT}          (needs /etc/hosts)
+  Sample workflow: minio-artifact-pipeline (mirrors minio1 → minio2 as a DAG)
+    kubectl get workflow -n ${NAMESPACE_ARGO}
+    argo logs minio-artifact-pipeline -n ${NAMESPACE_ARGO}
+    argo submit --watch ${SCRIPT_DIR}/argo-workflows.yaml -n ${NAMESPACE_ARGO}   # re-run it
+
 ${BOLD}Note:${RESET} port-forwards are running in the background.
-  To stop all:  kill \$(lsof -ti:${GRAFANA_PORT},${INGRESS_PORT},${MINIO1_PORT},${MINIO2_PORT})
+  To stop all:  kill \$(lsof -ti:${GRAFANA_PORT},${INGRESS_PORT},${MINIO1_PORT},${MINIO2_PORT},${ARGO_PORT})
 
 EOF

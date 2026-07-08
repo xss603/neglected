@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argo
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  name: argo-server
+  namespace: argo
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: argo.local
+    http:
+      paths:
+      - backend:
+          service:
+            name: argo-workflows-server
+            port:
+              number: 2746
+        path: /
+        pathType: Prefix
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-pipeline-creds
+  namespace: argo
+stringData:
+  DST_PASS: minio2secret
+  DST_USER: minio2admin
+  SRC_PASS: minio1secret
+  SRC_USER: minio1admin
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: minio-artifact-pipeline
+  namespace: argo
+spec:
+  entrypoint: pipeline
+  templates:
+  - dag:
+      tasks:
+      - arguments:
+          parameters:
+          - name: src-bucket
+            value: logs
+          - name: dst-bucket
+            value: logs
+        name: mirror-logs
+        template: mirror-bucket
+      - arguments:
+          parameters:
+          - name: src-bucket
+            value: configs
+          - name: dst-bucket
+            value: configs
+        name: mirror-configs
+        template: mirror-bucket
+      - arguments:
+          parameters:
+          - name: src-bucket
+            value: backups
+          - name: dst-bucket
+            value: backups
+        name: mirror-backups
+        template: mirror-bucket
+      - dependencies:
+        - mirror-logs
+        - mirror-configs
+        - mirror-backups
+        name: verify
+        template: verify-buckets
+    name: pipeline
+  - container:
+      args:
+      - |-
+        mc alias set src http://minio1.minio.svc.cluster.local:9000 $SRC_USER $SRC_PASS
+        mc alias set dst http://minio2.minio.svc.cluster.local:9000 $DST_USER $DST_PASS
+        mc mirror --preserve src/{{inputs.parameters.src-bucket}} dst/{{inputs.parameters.dst-bucket}}
+      command:
+      - sh
+      - -c
+      envFrom:
+      - secretRef:
+          name: minio-pipeline-creds
+      image: minio/mc:latest
+    inputs:
+      parameters:
+      - name: src-bucket
+      - name: dst-bucket
+    name: mirror-bucket
+  - container:
+      args:
+      - |-
+        mc alias set src http://minio1.minio.svc.cluster.local:9000 $SRC_USER $SRC_PASS
+        mc alias set dst http://minio2.minio.svc.cluster.local:9000 $DST_USER $DST_PASS
+        mc diff src/logs dst/logs
+        mc diff src/configs dst/configs
+        mc diff src/backups dst/backups
+      command:
+      - sh
+      - -c
+      envFrom:
+      - secretRef:
+          name: minio-pipeline-creds
+      image: minio/mc:latest
+    name: verify-buckets
