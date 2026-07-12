@@ -1,0 +1,47 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: minio-upload
+  namespace: argo
+spec:
+  entrypoint: upload
+  arguments:
+    parameters:
+    - name: bucket
+      value: uploads
+    - name: endpoint
+      value: minio1.minio.svc.cluster.local:9000
+  templates:
+  - name: upload
+    inputs:
+      parameters:
+      - name: bucket
+        value: uploads
+      - name: endpoint
+        value: minio1.minio.svc.cluster.local:9000
+      artifacts:
+      - name: data
+        path: /work/data
+    container:
+      image: rclone/rclone:latest
+      command: [sh, -c]
+      args:
+      - |-
+        rclone mkdir src:{{inputs.parameters.bucket}}
+        rclone copy /work/data src:{{inputs.parameters.bucket}}
+      env:
+      - name: RCLONE_CONFIG_SRC_TYPE
+        value: s3
+      - name: RCLONE_CONFIG_SRC_PROVIDER
+        value: Minio
+      - name: RCLONE_CONFIG_SRC_ENV_AUTH
+        value: "false"
+      - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
+        value: "$(SRC_USER)"
+      - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
+        value: "$(SRC_PASS)"
+      - name: RCLONE_CONFIG_SRC_ENDPOINT
+        value: "http://{{inputs.parameters.endpoint}}"
+      envFrom:
+      - secretRef:
+          name: minio-pipeline-creds
