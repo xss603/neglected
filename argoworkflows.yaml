@@ -1,0 +1,234 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: restart-deployment
+  namespace: argo-workflows
+spec:
+  serviceAccountName: deployment-restarter
+  entrypoint: restart-one
+
+  arguments:
+    parameters:
+      - name: namespace
+        value: argo-workflows
+      - name: deployment
+        value: argo-workflows-server
+      - name: selector
+        value: app.kubernetes.io/part-of=argo-workflows
+      - name: timeout
+        value: 180s
+
+  volumes:
+    # kubectl caches API discovery under $HOME/.kube/cache. With
+    # readOnlyRootFilesystem: true it needs a writable HOME or it dies immediately.
+    - name: tmp
+      emptyDir:
+        sizeLimit: 32Mi
+
+  templates:
+    # ---- entrypoint: restart ONE deployment and prove it rolled ----
+    - name: restart-one
+      inputs:
+        parameters:
+          - name: namespace
+            value: "{{workflow.parameters.namespace}}"
+          - name: deployment
+            value: "{{workflow.parameters.deployment}}"
+          - name: timeout
+            value: "{{workflow.parameters.timeout}}"
+      steps:
+        - - name: restart
+            template: rollout-restart
+            arguments:
+              parameters:
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: deployment
+                  value: "{{inputs.parameters.deployment}}"
+        # Separate step rather than "cmd1 && cmd2": each retries independently
+        # and the UI shows which half failed — restart, or the rollout itself.
+        - - name: wait
+            template: rollout-status
+            arguments:
+              parameters:
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: deployment
+                  value: "{{inputs.parameters.deployment}}"
+                - name: timeout
+                  value: "{{inputs.parameters.timeout}}"
+
+    # ---- alternate entrypoint: restart EVERY match of a label selector ----
+    - name: restart-many
+      inputs:
+        parameters:
+          - name: namespace
+            value: "{{workflow.parameters.namespace}}"
+          - name: selector
+            value: "{{workflow.parameters.selector}}"
+          - name: timeout
+            value: "{{workflow.parameters.timeout}}"
+      steps:
+        - - name: restart-all
+            template: rollout-restart-selector
+            arguments:
+              parameters:
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: selector
+                  value: "{{inputs.parameters.selector}}"
+        - - name: wait-all
+            template: wait-available-selector
+            arguments:
+              parameters:
+                - name: namespace
+                  value: "{{inputs.parameters.namespace}}"
+                - name: selector
+                  value: "{{inputs.parameters.selector}}"
+                - name: timeout
+                  value: "{{inputs.parameters.timeout}}"
+
+    # ---- leaf templates ----
+    # Every arg is its own list element. A single templated string holding a
+    # JSON array does NOT work: Argo substitutes parameters as strings, so the
+    # container would receive one literal '["rollout","restart"]' argument.
+    #
+    # No --server/--token/--kubeconfig anywhere, on purpose: kubectl uses
+    # IN-CLUSTER config — the projected token at
+    # /var/run/secrets/kubernetes.io/serviceaccount/token plus the
+    # KUBERNETES_SERVICE_HOST/PORT env vars kubelet injects. The identity is
+    # whatever serviceAccountName the workflow runs as, which is what makes the
+    # RBAC scoping the real control. automountServiceAccountToken: false would
+    # break this.
+    - name: rollout-restart
+      inputs:
+        parameters:
+          - name: namespace
+          - name: deployment
+      container:
+        # PINNED BY DIGEST, not optional: Bitnami stopped publishing versioned
+        # tags for bitnami/kubectl — only :latest remains (1.36.3/1.34.1/1.33.3
+        # now 404), versions moved to the frozen bitnamilegacy/ repo. Tracking
+        # :latest would silently shift the client version and trip the
+        # disallow-latest-tag Kyverno policy. This digest is client v1.36.3,
+        # an exact match for the API server. Re-pin on cluster upgrade.
+        image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+        # ENTRYPOINT is `kubectl`, so args ARE the kubectl arguments.
+        args:
+          - rollout
+          - restart
+          - "deployment/{{inputs.parameters.deployment}}"
+          - -n
+          - "{{inputs.parameters.namespace}}"
+        env:
+          - name: HOME
+            value: /tmp
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        # Image defaults to UID 1001; pinned to 65532 explicitly so the posture
+        # doesn't depend on an image default. Verified kubectl works under it.
+        securityContext: &restarterSecurity
+          runAsNonRoot: true
+          runAsUser: 65532
+          runAsGroup: 65532
+          allowPrivilegeEscalation: false
+          privileged: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+        resources: &restarterResources
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      retryStrategy: &restarterRetry
+        limit: "2"
+        retryPolicy: OnError
+
+    - name: rollout-status
+      inputs:
+        parameters:
+          - name: namespace
+          - name: deployment
+          - name: timeout
+      container:
+        image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+        args:
+          - rollout
+          - status
+          - "deployment/{{inputs.parameters.deployment}}"
+          - -n
+          - "{{inputs.parameters.namespace}}"
+          - "--timeout={{inputs.parameters.timeout}}"
+        env:
+          - name: HOME
+            value: /tmp
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        securityContext: *restarterSecurity
+        resources: *restarterResources
+      retryStrategy: *restarterRetry
+
+    - name: rollout-restart-selector
+      inputs:
+        parameters:
+          - name: namespace
+          - name: selector
+      container:
+        image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+        args:
+          - rollout
+          - restart
+          - deployment
+          - -n
+          - "{{inputs.parameters.namespace}}"
+          - -l
+          - "{{inputs.parameters.selector}}"
+        env:
+          - name: HOME
+            value: /tmp
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        securityContext: *restarterSecurity
+        resources: *restarterResources
+      retryStrategy: *restarterRetry
+
+    - name: wait-available-selector
+      inputs:
+        parameters:
+          - name: namespace
+          - name: selector
+          - name: timeout
+      container:
+        image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+        # CAVEAT: `rollout status` takes one resource, not a selector, so this
+        # waits on the Available condition instead. That is a WEAKER check — a
+        # Deployment can still report Available from its OLD ReplicaSet in the
+        # first moments of a rollout. Read restart-many's wait as "nothing
+        # broke", not "the new pods are serving". Use restart-one for the
+        # strong guarantee.
+        args:
+          - wait
+          - --for=condition=Available
+          - deployment
+          - -n
+          - "{{inputs.parameters.namespace}}"
+          - -l
+          - "{{inputs.parameters.selector}}"
+          - "--timeout={{inputs.parameters.timeout}}"
+        env:
+          - name: HOME
+            value: /tmp
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        securityContext: *restarterSecurity
+        resources: *restarterResources
+      retryStrategy: *restarterRetry
