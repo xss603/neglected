@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: pgsql-backup-minio-daily
+  namespace: argo
+spec:
+  # Daily at 02:00 in the workflow-controller's local time.
+  schedule: "0 2 * * *"
+  timezone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  workflowSpec:
+    workflowTemplateRef:
+      name: pgsql-backup-minio
+    arguments:
+      parameters:
+      - name: pg-host
+        value: postgres.postgres.svc.cluster.local
+      - name: pg-port
+        value: "5432"
+      - name: pg-database
+        value: postgres
+      - name: pg-user
+        value: postgres
+      - name: bucket
+        value: pgsql-backups
+      - name: endpoint
+        value: minio1.minio.svc.cluster.local:9000

@@ -25,6 +25,7 @@ spec:
     value: local
     effect: NoSchedule
   templates:
+  # ---- entrypoint: dump, then upload as two separate steps ----
   - name: backup
     inputs:
       parameters:
@@ -40,30 +41,82 @@ spec:
         value: "{{workflow.parameters.bucket}}"
       - name: endpoint
         value: "{{workflow.parameters.endpoint}}"
+    steps:
+    - - name: dump
+        template: pg-dump
+        arguments:
+          parameters:
+          - name: pg-host
+            value: "{{inputs.parameters.pg-host}}"
+          - name: pg-port
+            value: "{{inputs.parameters.pg-port}}"
+          - name: pg-database
+            value: "{{inputs.parameters.pg-database}}"
+          - name: pg-user
+            value: "{{inputs.parameters.pg-user}}"
+    # Separate step rather than piping pg_dump straight into rclone: each
+    # retries independently and the UI shows which half failed — the dump
+    # or the upload.
+    - - name: upload
+        template: upload
+        arguments:
+          parameters:
+          - name: bucket
+            value: "{{inputs.parameters.bucket}}"
+          - name: endpoint
+            value: "{{inputs.parameters.endpoint}}"
+          artifacts:
+          - name: dump
+            from: "{{steps.dump.outputs.artifacts.dump}}"
+
+  # ---- pg_dump on a postgres-native image, gzip'd, emitted as an artifact ----
+  - name: pg-dump
+    inputs:
+      parameters:
+      - name: pg-host
+      - name: pg-port
+      - name: pg-database
+      - name: pg-user
+    outputs:
+      artifacts:
+      - name: dump
+        path: /work/dump.sql.gz
     container:
-      image: rclone/rclone:latest
-      # postgres client tools aren't bundled in the rclone image, so pg_dump
-      # runs via apk before the backup — keeps this to a single container/step.
+      image: postgres:16-alpine
       command: [sh, -c]
       args:
       - |-
         set -eu
-        apk add --no-cache postgresql-client >/dev/null
-        dump="/tmp/{{inputs.parameters.pg-database}}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
         PGPASSWORD="$PG_PASSWORD" pg_dump \
           --host="{{inputs.parameters.pg-host}}" \
           --port="{{inputs.parameters.pg-port}}" \
           --username="{{inputs.parameters.pg-user}}" \
           --dbname="{{inputs.parameters.pg-database}}" \
-          --no-password | gzip > "$dump"
-        rclone mkdir src:{{inputs.parameters.bucket}}
-        rclone copy "$dump" src:{{inputs.parameters.bucket}}
+          --no-password | gzip > /work/dump.sql.gz
       env:
       - name: PG_PASSWORD
         valueFrom:
           secretKeyRef:
             name: pgsql-backup-creds
             key: pg-password
+
+  # ---- upload the dump artifact to MinIO, mirroring the minio-upload template ----
+  - name: upload
+    inputs:
+      parameters:
+      - name: bucket
+      - name: endpoint
+      artifacts:
+      - name: dump
+        path: /work/dump.sql.gz
+    container:
+      image: rclone/rclone:latest
+      command: [sh, -c]
+      args:
+      - |-
+        rclone mkdir src:{{inputs.parameters.bucket}}
+        rclone copyto /work/dump.sql.gz src:{{inputs.parameters.bucket}}/{{workflow.name}}.sql.gz
+      env:
       - name: RCLONE_CONFIG_SRC_TYPE
         value: s3
       - name: RCLONE_CONFIG_SRC_PROVIDER
