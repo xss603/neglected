@@ -1,0 +1,81 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: pgsql-backup-minio
+  namespace: argo
+spec:
+  entrypoint: backup
+  arguments:
+    parameters:
+    - name: pg-host
+      value: postgres.postgres.svc.cluster.local
+    - name: pg-port
+      value: "5432"
+    - name: pg-database
+      value: postgres
+    - name: pg-user
+      value: postgres
+    - name: bucket
+      value: pgsql-backups
+    - name: endpoint
+      value: minio1.minio.svc.cluster.local:9000
+  tolerations:
+  - key: zone
+    operator: Equal
+    value: local
+    effect: NoSchedule
+  templates:
+  - name: backup
+    inputs:
+      parameters:
+      - name: pg-host
+        value: "{{workflow.parameters.pg-host}}"
+      - name: pg-port
+        value: "{{workflow.parameters.pg-port}}"
+      - name: pg-database
+        value: "{{workflow.parameters.pg-database}}"
+      - name: pg-user
+        value: "{{workflow.parameters.pg-user}}"
+      - name: bucket
+        value: "{{workflow.parameters.bucket}}"
+      - name: endpoint
+        value: "{{workflow.parameters.endpoint}}"
+    container:
+      image: rclone/rclone:latest
+      # postgres client tools aren't bundled in the rclone image, so pg_dump
+      # runs via apk before the backup — keeps this to a single container/step.
+      command: [sh, -c]
+      args:
+      - |-
+        set -eu
+        apk add --no-cache postgresql-client >/dev/null
+        dump="/tmp/{{inputs.parameters.pg-database}}-$(date -u +%Y%m%dT%H%M%SZ).sql.gz"
+        PGPASSWORD="$PG_PASSWORD" pg_dump \
+          --host="{{inputs.parameters.pg-host}}" \
+          --port="{{inputs.parameters.pg-port}}" \
+          --username="{{inputs.parameters.pg-user}}" \
+          --dbname="{{inputs.parameters.pg-database}}" \
+          --no-password | gzip > "$dump"
+        rclone mkdir src:{{inputs.parameters.bucket}}
+        rclone copy "$dump" src:{{inputs.parameters.bucket}}
+      env:
+      - name: PG_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: pgsql-backup-creds
+            key: pg-password
+      - name: RCLONE_CONFIG_SRC_TYPE
+        value: s3
+      - name: RCLONE_CONFIG_SRC_PROVIDER
+        value: Minio
+      - name: RCLONE_CONFIG_SRC_ENV_AUTH
+        value: "false"
+      - name: RCLONE_CONFIG_SRC_ACCESS_KEY_ID
+        value: "$(SRC_USER)"
+      - name: RCLONE_CONFIG_SRC_SECRET_ACCESS_KEY
+        value: "$(SRC_PASS)"
+      - name: RCLONE_CONFIG_SRC_ENDPOINT
+        value: "http://{{inputs.parameters.endpoint}}"
+      envFrom:
+      - secretRef:
+          name: minio-pipeline-creds
