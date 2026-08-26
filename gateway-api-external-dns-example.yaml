@@ -1,0 +1,77 @@
+# Example: Gateway API (Gateway + HTTPRoute) wired up to external-dns.
+#
+# Requires external-dns deployed with the Gateway API source enabled, e.g. via
+# Helm values:
+#
+#   sources:
+#     - gateway-httproute
+#   policy: sync
+#   provider: <your-dns-provider>   # e.g. cloudflare, aws, google, rfc2136, ...
+#
+# and RBAC that lets external-dns read Gateway/HTTPRoute resources
+# (gateway.networking.k8s.io) in addition to Services/Ingresses.
+#
+# With --source=gateway-httproute, external-dns derives:
+#   - the DNS name to create from HTTPRoute.spec.hostnames
+#     (or from an external-dns.alpha.kubernetes.io/hostname annotation, which
+#     can add/override hostnames)
+#   - the record target from the parent Gateway's status.addresses
+#     (or from an external-dns.alpha.kubernetes.io/target annotation override)
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: sample-app-gateway
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app-gateway
+spec:
+  gatewayClassName: kgateway
+  listeners:
+    - name: https
+      hostname: sample-app.example.com
+      port: 8443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - group: ""
+            kind: Secret
+            name: sample-app-gateway-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sample-app
+  namespace: sample-app
+  labels:
+    app.kubernetes.io/name: sample-app-gateway
+  annotations:
+    # Explicit hostname for external-dns to publish (redundant with
+    # spec.hostnames below, but useful if you ever want to publish a
+    # different public name than the route's own hostname).
+    external-dns.alpha.kubernetes.io/hostname: sample-app.example.com
+    # Only needed if you must force a specific target instead of using the
+    # Gateway's status.addresses (e.g. behind an LB whose address external-dns
+    # can't resolve, or when pointing at a fixed IP).
+    # external-dns.alpha.kubernetes.io/target: "203.0.113.10"
+    external-dns.alpha.kubernetes.io/ttl: "300"
+spec:
+  parentRefs:
+    - name: sample-app-gateway
+      sectionName: https
+  hostnames:
+    - sample-app.example.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: sample-app-frontend
+          kind: Service
+          port: 8080
+          weight: 1
