@@ -1,31 +1,48 @@
 #!/usr/bin/env bash
 # kgateway-healthcheck.sh
 # Deep-check Gateway API + kgateway/Envoy xDS state
-# Usage: ./kgateway-healthcheck.sh <namespace> <gateway-name> [admin-port]
+# Usage: ./kgateway-healthcheck.sh <namespace> <gateway-name> [domain] [admin-port]
 #
-# Changelog vs. original:
+# Optional env vars (control-plane pod usually lives in a different
+# namespace/release than the Gateway's own auto-provisioned proxy pod -
+# no reliable way to derive this from the Gateway object itself):
+#   CONTROLLER_NS     default: kgateway-system
+#   CONTROLLER_LABEL  default: app.kubernetes.io/name=kgateway
+#
+# Changelog vs. previous version:
 #   - set -u no longer crashes mid-run (EXT_IP/LISTENERS pre-initialized)
 #   - trap EXIT kills the port-forward on any exit path, not just the happy path
-#   - preflight check for kubectl/jq
+#   - preflight check for kubectl/jq/curl (+dig if a domain is passed)
 #   - GatewayClass check added (step 0) - the #1 real-world root cause in this
 #     failure class: kgateway ships no GatewayClass by default
 #   - sections 7/8 filtered to routes that actually parentRef this Gateway
 #   - multi-pod warning instead of silently picking items[0]
-#   - per-run tmpdir (mktemp -d) + dynamic-ish admin port instead of fixed /tmp
-#     paths and a hardcoded local port, so two runs don't collide
+#   - per-run tmpdir (mktemp -d) instead of fixed /tmp paths
 #   - port-forward readiness polled instead of a fixed sleep 2
+#   - NEW 10: NodePort direct test, bypassing the LB entirely
+#   - NEW 11: DNS resolution vs actual EXTERNAL-IP + curl --resolve (bypasses
+#     DNS while still exercising the real Host header / SNI path)
+#   - NEW 12: Envoy proxy pod log scan for known failure-signature strings
+#   - NEW 13: kgateway controller pod log scan (translation/reconcile errors -
+#     this is the thing that produces "Gateway looks fine, HTTPRoute looks
+#     fine, but nothing actually got wired into Envoy" with zero status signal)
 
 set -uo pipefail
-NS="${1:?Usage: $0 <namespace> <gateway-name> [admin-port]}"
-GW="${2:?Usage: $0 <namespace> <gateway-name> [admin-port]}"
-ADMIN_PORT="${3:-19000}"   # kgateway default; some builds expose Envoy admin on 9901 instead
+NS="${1:?Usage: $0 <namespace> <gateway-name> [domain] [admin-port]}"
+GW="${2:?Usage: $0 <namespace> <gateway-name> [domain] [admin-port]}"
+DOMAIN="${3:-}"            # optional - enables sections 11's DNS/curl checks
+ADMIN_PORT="${4:-19000}"   # kgateway default; some builds expose Envoy admin on 9901 instead
+CONTROLLER_NS="${CONTROLLER_NS:-kgateway-system}"
+CONTROLLER_LABEL="${CONTROLLER_LABEL:-app.kubernetes.io/name=kgateway}"
 
 PASS="\033[32mOK\033[0m"; FAIL="\033[31mFAIL\033[0m"; WARN="\033[33mWARN\033[0m"
 ok(){ echo -e "[$PASS] $1"; }
 ko(){ echo -e "[$FAIL] $1"; }
 warn(){ echo -e "[$WARN] $1"; }
 
-for bin in kubectl jq curl; do
+REQUIRED_BINS=(kubectl jq curl)
+[[ -n "$DOMAIN" ]] && REQUIRED_BINS+=(dig)
+for bin in "${REQUIRED_BINS[@]}"; do
   command -v "$bin" >/dev/null 2>&1 || { echo "missing required binary: $bin" >&2; exit 2; }
 done
 
@@ -139,7 +156,7 @@ if [[ -n "$GW_POD" ]]; then
     curl -s --max-time 3 "http://localhost:$ADMIN_PORT/config_dump?resource=dynamic_route_configs" \
       | jq -r '.. | .route?.action? // empty' 2>/dev/null | head -10
   else
-    warn "Envoy admin API not reachable on $ADMIN_PORT within 5s (try passing 9901 as \$3, or check GatewayParameters adminPort). port-forward log: $TMPDIR/pf.log"
+    warn "Envoy admin API not reachable on $ADMIN_PORT within 5s (try passing 9901 as \$4, or check GatewayParameters adminPort). port-forward log: $TMPDIR/pf.log"
   fi
 
   kill "$PF_PID" 2>/dev/null; PF_PID=""
@@ -172,6 +189,124 @@ warn "Run manually: cloud firewall/SG check for EXTERNAL-IP=$EXT_IP on ports: $L
 echo "  AWS: aws ec2 describe-security-groups --group-ids <sg-id>"
 echo "  GCP: gcloud compute firewall-rules list"
 echo "  Azure: az network nsg rule list --nsg-name <nsg>"
+
+echo
+echo "=== 10. NodePort direct test (bypass the LB entirely) ==="
+if [[ -f "$TMPDIR/svc.json" ]]; then
+  NODEPORTS=$(jq -r '.spec.ports[] | select(.nodePort != null) | "\(.port):\(.nodePort)"' "$TMPDIR/svc.json")
+  if [[ -z "$NODEPORTS" ]]; then
+    warn "No nodePort allocated on $GW_SVC (Service type is probably ClusterIP, or LoadBalancer without nodePorts) — skipping"
+  else
+    NODE_IPS=$(kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}')
+    if [[ -z "$NODE_IPS" ]]; then
+      warn "No node InternalIP found — skipping NodePort test"
+    else
+      while IFS=: read -r SVC_PORT NODE_PORT; do
+        for NODE_IP in $NODE_IPS; do
+          echo "-- curl http://$NODE_IP:$NODE_PORT/ (svc port $SVC_PORT) --"
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://$NODE_IP:$NODE_PORT/" 2>/dev/null)
+          if [[ -n "$CODE" && "$CODE" != "000" ]]; then
+            ok "NodePort $NODE_IP:$NODE_PORT answered HTTP $CODE — LB is the suspect if the external IP itself fails, not the cluster"
+          else
+            ko "NodePort $NODE_IP:$NODE_PORT unreachable (connection refused/timeout) — problem is inside the cluster (kube-proxy, NetworkPolicy, or Envoy not bound), not the cloud LB"
+          fi
+        done
+      done <<< "$NODEPORTS"
+    fi
+  fi
+else
+  warn "Section 3 didn't resolve a Service — skipping NodePort test"
+fi
+
+echo
+echo "=== 11. DNS vs EXTERNAL-IP, and curl --resolve (bypasses DNS, exercises real Host/SNI path) ==="
+if [[ -z "$DOMAIN" ]]; then
+  warn "No domain passed as \$3 — skipping. Re-run with: $0 $NS $GW <your-domain>"
+else
+  RESOLVED_IP=$(dig +short "$DOMAIN" | tail -n1)
+  echo "DNS $DOMAIN -> $RESOLVED_IP | Service EXTERNAL-IP=$EXT_IP"
+  if [[ -n "$RESOLVED_IP" && "$RESOLVED_IP" == "$EXT_IP" ]]; then
+    ok "DNS matches the Gateway's current EXTERNAL-IP"
+  else
+    ko "DNS ($RESOLVED_IP) does NOT match EXTERNAL-IP ($EXT_IP) — stale record, wrong zone, or LB IP changed after recreation; nothing cluster-side will fix this"
+  fi
+
+  if [[ "$EXT_IP" != "unknown" && "$EXT_IP" != "pending" && -n "$EXT_IP" ]]; then
+    echo "-- curl --resolve $DOMAIN -> $EXT_IP directly (HTTP) --"
+    curl -v --resolve "$DOMAIN:80:$EXT_IP" "http://$DOMAIN/" --max-time 5 2>&1 | tail -n 20
+    echo "-- curl --resolve $DOMAIN -> $EXT_IP directly (HTTPS, -k to ignore cert trust chain, SNI still sent) --"
+    curl -vk --resolve "$DOMAIN:443:$EXT_IP" "https://$DOMAIN/" --max-time 5 2>&1 | tail -n 20
+    echo "  (this hits the real EXTERNAL-IP with the real Host header/SNI, independent of DNS —"
+    echo "   if this works but the plain URL doesn't, it's pure DNS; if this also fails, it's LB/Envoy)"
+  else
+    warn "No usable EXTERNAL-IP ($EXT_IP) — skipping curl --resolve"
+  fi
+fi
+
+echo
+echo "=== 12. Envoy proxy pod logs — known failure-signature scan ==="
+if [[ -n "$GW_POD" ]]; then
+  kubectl logs -n "$NS" "$GW_POD" --tail=500 > "$TMPDIR/envoy.log" 2>/dev/null || warn "Could not fetch logs for $GW_POD"
+  if [[ -s "$TMPDIR/envoy.log" ]]; then
+    declare -A ENVOY_PATTERNS=(
+      ["no healthy upstream"]="all endpoints for a cluster are down/unhealthy - check section 6 /clusters health_flags"
+      ["upstream connect error"]="Envoy accepted the connection but couldn't reach the backend pod - stale EDS entry or NetworkPolicy blocking Envoy->pod"
+      ["no cluster"]="route points at a cluster name that doesn't exist - backendRef port/name mismatch, see section 8"
+      ["failed_outlier_check"]="Envoy locally ejected a pod after prior errors, independent of k8s Ready status"
+      ["rbac"]="an Envoy RBAC/authz filter is denying the request - check any SecurityPolicy/RBAC filter attached to this route"
+      ["tls"]="TLS handshake/cert issue at the listener - check the referenced Secret's validity and SNI match"
+      ["deny"]="request explicitly denied by a filter - check ext_authz/RBAC/WAF-type policies on this route"
+    )
+    FOUND_ANY=0
+    for pat in "${!ENVOY_PATTERNS[@]}"; do
+      HITS=$(grep -ic "$pat" "$TMPDIR/envoy.log" || true)
+      if [[ "$HITS" -gt 0 ]]; then
+        FOUND_ANY=1
+        ko "Envoy log: '$pat' seen $HITS time(s) — ${ENVOY_PATTERNS[$pat]}"
+        grep -i "$pat" "$TMPDIR/envoy.log" | tail -n 3 | sed 's/^/    /'
+      fi
+    done
+    [[ "$FOUND_ANY" -eq 0 ]] && ok "No known failure signatures in last 500 lines of Envoy proxy pod logs"
+  else
+    warn "Envoy proxy pod log is empty or unreadable"
+  fi
+else
+  warn "No Gateway pod resolved — skipping Envoy log scan"
+fi
+
+echo
+echo "=== 13. kgateway controller pod logs — translation/reconcile error scan ==="
+echo "(control plane is a separate component from the Envoy data-plane pod above -"
+echo " a silent RBAC/watch failure here produces a Gateway/HTTPRoute that both look"
+echo " Accepted/ResolvedRefs=True in status, with nothing actually wired into Envoy)"
+CTRL_POD=$(kubectl get pods -n "$CONTROLLER_NS" -l "$CONTROLLER_LABEL" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+if [[ -z "$CTRL_POD" ]]; then
+  warn "No controller pod found in ns=$CONTROLLER_NS label=$CONTROLLER_LABEL — override with \$CONTROLLER_NS/\$CONTROLLER_LABEL env vars if kgateway is installed elsewhere"
+else
+  ok "Controller pod: $CTRL_POD (ns=$CONTROLLER_NS)"
+  kubectl logs -n "$CONTROLLER_NS" "$CTRL_POD" --tail=500 > "$TMPDIR/controller.log" 2>/dev/null || warn "Could not fetch logs for $CTRL_POD"
+  if [[ -s "$TMPDIR/controller.log" ]]; then
+    declare -A CTRL_PATTERNS=(
+      ["error"]="generic reconcile error - read the surrounding lines for which object it's about"
+      ["forbidden"]="RBAC denial watching/reading a resource (commonly EndpointSlice/Service/Secret in another namespace) - controller silently stops translating that object with zero status signal on the Gateway/HTTPRoute itself"
+      ["failed to"]="a specific translation/reconcile step failed"
+      ["reject"]="a resource was rejected during translation"
+      ["panic"]="controller crashed while processing an object - check for a restart/crashloop"
+    )
+    FOUND_ANY=0
+    for pat in "${!CTRL_PATTERNS[@]}"; do
+      HITS=$(grep -ic "$pat" "$TMPDIR/controller.log" || true)
+      if [[ "$HITS" -gt 0 ]]; then
+        FOUND_ANY=1
+        ko "Controller log: '$pat' seen $HITS time(s) — ${CTRL_PATTERNS[$pat]}"
+        grep -i "$pat" "$TMPDIR/controller.log" | tail -n 3 | sed 's/^/    /'
+      fi
+    done
+    [[ "$FOUND_ANY" -eq 0 ]] && ok "No known failure signatures in last 500 lines of controller logs"
+  else
+    warn "Controller pod log is empty or unreadable"
+  fi
+fi
 
 echo
 echo "=== DONE ==="
