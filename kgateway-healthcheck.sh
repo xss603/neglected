@@ -118,14 +118,60 @@ if [[ -n "$GW_POD" ]]; then
   READY=$(kubectl get pod "$GW_POD" -n "$NS" -o jsonpath='{.status.containerStatuses[0].ready}')
   [[ "$READY" == "true" ]] && ok "Pod Ready=true" || ko "Pod Ready=$READY"
 
-  echo "-- Listening sockets inside pod (ss -tlnp) --"
-  kubectl exec -n "$NS" "$GW_POD" -- sh -c "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null" 2>/dev/null \
-    || warn "Could not exec ss/netstat — expected if this is a distroless Envoy image with no shell; rely on section 6's admin API instead"
+  # Determine ONCE whether we can exec a shell + ss/netstat at all. Distroless
+  # Envoy images have neither. Previously a failed exec left BOUND empty, which
+  # defaulted to 0 and was reported as a hard FAIL - a false positive claiming
+  # the port wasn't bound when we simply never managed to look.
+  CAN_EXEC=0
+  if kubectl exec -n "$NS" "$GW_POD" -- sh -c 'command -v ss >/dev/null 2>&1 || command -v netstat >/dev/null 2>&1' >/dev/null 2>&1; then
+    CAN_EXEC=1
+  fi
 
-  echo "-- Cross-check: declared listener ports vs actually bound sockets --"
+  if [[ "$CAN_EXEC" -eq 1 ]]; then
+    echo "-- Listening sockets inside pod --"
+    kubectl exec -n "$NS" "$GW_POD" -- sh -c "ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null" 2>/dev/null
+  else
+    warn "No shell/ss/netstat in this image (distroless Envoy is normal) — the port checks below are UNKNOWN, NOT failures. Section 6's admin API /listeners is authoritative."
+  fi
+
+  echo "-- Cross-check: Gateway listener port -> Service targetPort -> bound socket --"
+  # A Gateway listener on a privileged port (80/443) is almost never bound
+  # directly by Envoy: a non-root container cannot bind <1024 without
+  # CAP_NET_BIND_SERVICE, so the Service maps 443 -> a higher targetPort
+  # (commonly 8443) and Envoy binds THAT. Comparing the listener port against
+  # bound sockets therefore produces a guaranteed false FAIL for any privileged
+  # port. Resolve through the Service's targetPort first.
   for lp in $(echo "$LISTENERS" | cut -d: -f2); do
-    BOUND=$(kubectl exec -n "$NS" "$GW_POD" -- sh -c "ss -tln 2>/dev/null | grep -c ':$lp '" 2>/dev/null)
-    [[ "${BOUND:-0}" -gt 0 ]] && ok "Port $lp is bound in pod" || ko "Port $lp declared in Gateway but NOT bound in pod (check GatewayParameters container port, or image has no shell to verify)"
+    [[ -z "$lp" ]] && continue
+    TP=""
+    if [[ -f "$TMPDIR/svc.json" ]]; then
+      TP=$(jq -r --arg p "$lp" '.spec.ports[] | select((.port|tostring)==$p) | .targetPort' "$TMPDIR/svc.json" 2>/dev/null | head -1)
+    fi
+    [[ -z "$TP" || "$TP" == "null" ]] && TP="$lp"
+
+    # targetPort may be a NAME rather than a number - resolve via containerPort.
+    if [[ "$TP" =~ ^[0-9]+$ ]]; then
+      TP_DESC="$TP"
+    else
+      RESOLVED=$(kubectl get pod "$GW_POD" -n "$NS" -o json 2>/dev/null \
+        | jq -r --arg n "$TP" '.spec.containers[].ports[]? | select(.name==$n) | .containerPort' 2>/dev/null | head -1)
+      if [[ -n "$RESOLVED" && "$RESOLVED" != "null" ]]; then
+        TP_DESC="$TP -> $RESOLVED"; TP="$RESOLVED"
+      else
+        TP_DESC="$TP (name unresolved)"
+      fi
+    fi
+
+    if [[ "$CAN_EXEC" -eq 0 ]]; then
+      warn "listener $lp -> targetPort $TP_DESC : UNKNOWN (no shell in image; confirm via section 6 /listeners)"
+      continue
+    fi
+    BOUND=$(kubectl exec -n "$NS" "$GW_POD" -- sh -c "ss -tln 2>/dev/null | grep -c ':$TP '" 2>/dev/null)
+    if [[ "${BOUND:-0}" -gt 0 ]]; then
+      ok "listener $lp -> targetPort $TP_DESC is bound in pod"
+    else
+      ko "listener $lp -> targetPort $TP_DESC NOT bound (real bind failure — grep Envoy logs for 'error adding listener')"
+    fi
   done
 fi
 
