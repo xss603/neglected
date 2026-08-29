@@ -78,13 +78,31 @@ echo "Declared listeners: $LISTENERS"
 
 echo
 echo "=== 2. GatewayParameters (deployment/service port mapping) ==="
+# parametersRef can be wired in TWO places: per-Gateway
+# (.spec.infrastructure.parametersRef) or cluster-wide on the GatewayClass
+# (.spec.parametersRef). Only checking the first reports "using controller
+# defaults" for a perfectly valid GatewayClass-level wiring.
 GWP_NAME=$(kubectl get gateway "$GW" -n "$NS" -o jsonpath='{.spec.infrastructure.parametersRef.name}' 2>/dev/null)
+GWP_SRC="Gateway.spec.infrastructure.parametersRef"
+if [[ -z "$GWP_NAME" && -n "${GWC:-}" ]]; then
+  GWP_NAME=$(kubectl get gatewayclass "$GWC" -o jsonpath='{.spec.parametersRef.name}' 2>/dev/null)
+  GWP_NS=$(kubectl get gatewayclass "$GWC" -o jsonpath='{.spec.parametersRef.namespace}' 2>/dev/null)
+  GWP_SRC="GatewayClass/$GWC .spec.parametersRef"
+fi
+GWP_NS="${GWP_NS:-$NS}"
+
 if [[ -n "$GWP_NAME" ]]; then
-  kubectl get gatewayparameters "$GWP_NAME" -n "$NS" -o json > "$TMPDIR/gwp.json" 2>/dev/null
-  GWP_SVC_PORTS=$(jq -r '.spec.kube.service.ports[]? | "\(.port):\(.targetPort)"' "$TMPDIR/gwp.json")
-  echo "GatewayParameters svc ports (port:targetPort): $GWP_SVC_PORTS"
+  ok "GatewayParameters '$GWP_NAME' (ns=$GWP_NS) via $GWP_SRC"
+  if kubectl get gatewayparameters "$GWP_NAME" -n "$GWP_NS" -o json > "$TMPDIR/gwp.json" 2>/dev/null; then
+    GWP_SVC_PORTS=$(jq -r '.spec.kube.service.ports[]? | "\(.port):\(.targetPort)"' "$TMPDIR/gwp.json")
+    echo "GatewayParameters svc ports (port:targetPort): ${GWP_SVC_PORTS:-<none declared>}"
+    GWP_SVC_TYPE=$(jq -r '.spec.kube.service.type // "<not set>"' "$TMPDIR/gwp.json")
+    echo "GatewayParameters svc type: $GWP_SVC_TYPE"
+  else
+    ko "parametersRef points at '$GWP_NAME' (ns=$GWP_NS) but that GatewayParameters does NOT exist -> silently ignored, controller defaults apply (Service may fall back to ClusterIP = no external IP at all)"
+  fi
 else
-  warn "No GatewayParameters parametersRef found — using controller defaults"
+  warn "No parametersRef on either the Gateway or the GatewayClass — using controller defaults"
 fi
 
 echo
@@ -103,6 +121,42 @@ else
   EXT_IP=$(jq -r '.status.loadBalancer.ingress[0].ip // "pending"' "$TMPDIR/svc.json")
   echo "Service type: $SVC_TYPE | External IP: $EXT_IP"
   jq -r '.spec.ports[] | "  port=\(.port) targetPort=\(.targetPort) nodePort=\(.nodePort // "n/a")"' "$TMPDIR/svc.json"
+fi
+
+echo
+echo "=== 3bis. Did GatewayParameters' annotations actually land on the Service? ==="
+# CANARY: a declared annotation missing from the live Service proves
+# GatewayParameters is being ignored WHOLESALE - meaning its service type,
+# ports and LB class are ignored too. That alone can leave you with no
+# usable LoadBalancer, which presents to a client as connection-refused.
+if [[ -f "$TMPDIR/gwp.json" && -f "$TMPDIR/svc.json" ]]; then
+  jq -r '[(.spec.kube.service.extraAnnotations // {}), (.spec.kube.service.annotations // {})]
+         | add // {} | to_entries[] | "\(.key)=\(.value)"' "$TMPDIR/gwp.json" 2>/dev/null \
+    > "$TMPDIR/gwp_annotations.txt"
+
+  if [[ -s "$TMPDIR/gwp_annotations.txt" ]]; then
+    while IFS= read -r kv; do
+      [[ -z "$kv" ]] && continue
+      k="${kv%%=*}"; v="${kv#*=}"
+      LIVE=$(jq -r --arg k "$k" '.metadata.annotations[$k] // "__ABSENT__"' "$TMPDIR/svc.json" 2>/dev/null)
+      if [[ "$LIVE" == "__ABSENT__" ]]; then
+        ko "annotation '$k' declared in GatewayParameters but ABSENT on the live Service"
+        ko "  -> GatewayParameters is NOT being applied; its service type/ports/LB class are ignored too"
+      elif [[ "$LIVE" != "$v" ]]; then
+        warn "annotation '$k': declared '$v' but live value is '$LIVE' (something else is overwriting it)"
+      else
+        ok "annotation '$k=$v' present on live Service — GatewayParameters IS being applied"
+      fi
+    done < "$TMPDIR/gwp_annotations.txt"
+  else
+    warn "No service annotations declared in GatewayParameters (nothing to cross-check)"
+  fi
+
+  echo "-- All annotations currently on the live Service --"
+  jq -r '.metadata.annotations // {} | to_entries[] | "  \(.key)=\(.value)"' "$TMPDIR/svc.json" 2>/dev/null \
+    || echo "  <none>"
+else
+  warn "Need both GatewayParameters (section 2) and the Service (section 3) to cross-check — skipping"
 fi
 
 echo
