@@ -34,6 +34,7 @@ set -euo pipefail
 TO=""
 FROM=""
 PROBE=0
+SUMMARY=0
 TIMEOUT=3
 DOMAIN="${CLUSTER_DOMAIN:-cluster.local}"
 OUTPUT="table"
@@ -45,6 +46,7 @@ Usage: ${0##*/} [--probe --from <ns>[,<ns>...]] [--to <ns>[,<ns>...]] [options]
 Options:
       --to <ns,...>     namespaces to inventory / probe TOWARDS (default: all)
       --probe           actually connect, from existing pods
+      --summary         one verdict line per namespace pair (implies --probe)
       --from <ns,...>   source namespaces to probe FROM (default: same as --to)
   -t, --timeout <sec>   per-connection timeout          (default: ${TIMEOUT})
   -d, --domain <d>      cluster DNS domain              (default: ${DOMAIN})
@@ -55,6 +57,7 @@ Examples:
   ${0##*/}                                  # inventory of every ns
   ${0##*/} --to vault,argocd -o csv         # just those two, as CSV
   ${0##*/} --probe --from argocd --to vault # argocd's pods -> vault's svcs
+  ${0##*/} --summary --from ns1 --to ns2    # just: connectable or not
 EOF
 }
 
@@ -63,6 +66,7 @@ while [[ $# -gt 0 ]]; do
     --to)         TO="${2:?--to needs a value}"; shift 2 ;;
     --from)       FROM="${2:?--from needs a value}"; shift 2 ;;
     --probe)      PROBE=1; shift ;;
+    --summary)    PROBE=1; SUMMARY=1; shift ;;
     -t|--timeout) TIMEOUT="${2:?--timeout needs a value}"; shift 2 ;;
     -d|--domain)  DOMAIN="${2:?--domain needs a value}"; shift 2 ;;
     -o|--output)  OUTPUT="${2:?--output needs a value}"; shift 2 ;;
@@ -179,31 +183,82 @@ probe_other() {
     else echo refused; fi" 2>/dev/null || echo exec_fail
 }
 
-row SRC_NS SRC_POD TOOL DST_NS DST_SVC FQDN PORT RESULT
+# Emits raw TSV rows; the callers below format them.
+probe_rows() {
+  while read -r src; do
+    [[ -n "$src" ]] || continue
+    read -r pod ctr < <(pick_pod "$src") || true
+    if [[ -z "${pod:-}" ]]; then
+      echo "no Running pod to borrow in namespace $src - skipping" >&2
+      continue
+    fi
+    tool="$(detect_tool "$src" "$pod" "$ctr")"
+    if [[ "$tool" == "none" || "$tool" == "noexec" ]]; then
+      echo "pod $src/$pod ($ctr) has no curl/wget/nc/bash - cannot probe from it" >&2
+      continue
+    fi
 
-while read -r src; do
-  [[ -n "$src" ]] || continue
-  read -r pod ctr < <(pick_pod "$src") || true
-  if [[ -z "${pod:-}" ]]; then
-    echo "no Running pod to borrow in namespace $src - skipping" >&2
-    continue
-  fi
-  tool="$(detect_tool "$src" "$pod" "$ctr")"
-  if [[ "$tool" == "none" || "$tool" == "noexec" ]]; then
-    echo "pod $src/$pod ($ctr) has no curl/wget/nc/bash - cannot probe from it" >&2
-    continue
-  fi
+    while read -r dst; do
+      [[ -n "$dst" ]] || continue
+      while IFS=$'\t' read -r _ns svc _type _cip port proto fqdn; do
+        [[ "$proto" == "TCP" ]] || continue      # curl/nc here are TCP only
+        if [[ "$tool" == "curl" ]]; then
+          res="$(probe_curl "$src" "$pod" "$ctr" "$fqdn" "$port")"
+        else
+          res="$(probe_other "$src" "$pod" "$ctr" "$fqdn" "$port" "$tool")"
+        fi
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$src" "$pod" "$tool" "$dst" "$svc" "$fqdn" "$port" "$res"
+      done < <(services_in "$dst")
+    done < <(ns_list "$TO")
+  done < <(ns_list "$FROM")
+}
 
-  while read -r dst; do
-    [[ -n "$dst" ]] || continue
-    while IFS=$'\t' read -r _ns svc _type _cip port proto fqdn; do
-      [[ "$proto" == "TCP" ]] || continue      # curl/nc here are TCP only
-      if [[ "$tool" == "curl" ]]; then
-        res="$(probe_curl "$src" "$pod" "$ctr" "$fqdn" "$port")"
-      else
-        res="$(probe_other "$src" "$pod" "$ctr" "$fqdn" "$port" "$tool")"
-      fi
-      row "$src" "$pod" "$tool" "$dst" "$svc" "$fqdn" "$port" "$res"
-    done < <(services_in "$dst")
-  done < <(ns_list "$TO")
-done < <(ns_list "$FROM") | render
+# Collapse per-port results into one verdict per namespace pair.
+#
+# The key judgement: "refused" means the packet REACHED a host that sent
+# back an RST, so the network path is permitted - there is just nothing
+# listening on that port. For connectivity mapping that counts as open.
+# Only "filtered" (silence) is evidence of a block.
+#
+#   YES       nothing filtered, and at least one port answered
+#   NO        every port filtered
+#   PARTIAL   some ports allowed, some filtered - policy is port-specific
+#   UNKNOWN   only DNS failures or errors; nothing was actually tested
+summarize() {
+  awk -F'\t' '
+    { pair = $1 " -> " $4
+      if (!(pair in seen)) { seen[pair] = 1; order[++n] = pair }
+      total[pair]++
+      c[pair "|" $8]++
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        p = order[i]
+        o = c[p "|open"]; r = c[p "|refused"]
+        f = c[p "|filtered"]; d = c[p "|dns_fail"]
+        reachable = o + r
+        if (reachable > 0 && f == 0)      v = "YES"
+        else if (f > 0 && reachable == 0) v = "NO"
+        else if (f > 0 && reachable > 0)  v = "PARTIAL"
+        else                              v = "UNKNOWN"
+        detail = "open=" o+0 " refused=" r+0 " filtered=" f+0 " dns_fail=" d+0
+        print p "\t" v "\t" reachable "/" total[p] "\t" detail
+      }
+    }'
+}
+
+if [[ $SUMMARY -eq 1 ]]; then
+  { row PAIR CONNECTABLE REACHABLE_PORTS DETAIL
+    probe_rows | summarize \
+      | while IFS=$'\t' read -r pair verdict ratio detail; do
+          row "$pair" "$verdict" "$ratio" "$detail"
+        done
+  } | render
+else
+  { row SRC_NS SRC_POD TOOL DST_NS DST_SVC FQDN PORT RESULT
+    probe_rows | while IFS=$'\t' read -r a b cc d e f g h; do
+      row "$a" "$b" "$cc" "$d" "$e" "$f" "$g" "$h"
+    done
+  } | render
+fi
