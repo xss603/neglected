@@ -36,6 +36,7 @@ FROM=""
 PROBE=0
 SUMMARY=0
 TIMEOUT=3
+MAX_CANDIDATES="${MAX_CANDIDATES:-25}"
 DOMAIN="${CLUSTER_DOMAIN:-cluster.local}"
 OUTPUT="table"
 
@@ -49,6 +50,8 @@ Options:
       --summary         one verdict line per namespace pair (implies --probe)
       --from <ns,...>   source namespaces to probe FROM (default: same as --to)
   -t, --timeout <sec>   per-connection timeout          (default: ${TIMEOUT})
+      --max-candidates <n>  containers to try per namespace when hunting
+                        for a usable tool           (default: ${MAX_CANDIDATES})
   -d, --domain <d>      cluster DNS domain              (default: ${DOMAIN})
   -o, --output <fmt>    table | csv                     (default: table)
   -h, --help            show this help
@@ -68,6 +71,7 @@ while [[ $# -gt 0 ]]; do
     --probe)      PROBE=1; shift ;;
     --summary)    PROBE=1; SUMMARY=1; shift ;;
     -t|--timeout) TIMEOUT="${2:?--timeout needs a value}"; shift 2 ;;
+    --max-candidates) MAX_CANDIDATES="${2:?--max-candidates needs a value}"; shift 2 ;;
     -d|--domain)  DOMAIN="${2:?--domain needs a value}"; shift 2 ;;
     -o|--output)  OUTPUT="${2:?--output needs a value}"; shift 2 ;;
     -h|--help)    usage; exit 0 ;;
@@ -125,13 +129,57 @@ fi
 # ====================== probe mode ====================================
 [[ -n "$FROM" ]] || FROM="$TO"
 
-# Pick a Running pod to borrow in this namespace, and its first container.
-pick_pod() {
+# Every Running pod in the namespace, and every container in each - all
+# containers of a pod share one network namespace, so any of them is an
+# equally valid vantage point for a connectivity test.
+candidates() {
   local ns="$1"
+  # Emitted as "pod<TAB>container", one line per container.
   kubectl get pods -n "$ns" \
     --field-selector=status.phase=Running \
-    -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[0].name}{"\n"}{end}' 2>/dev/null \
-    | head -1
+    -o go-template='{{range .items}}{{$pod := .metadata.name}}{{range .spec.containers}}{{$pod}}{{"\t"}}{{.name}}{{"\n"}}{{end}}{{end}}' 2>/dev/null
+}
+
+# Walk the namespace until a container with a usable tool turns up.
+#
+# A pod without curl/wget/nc/bash is common (distroless, scratch,
+# purpose-built images) and so is a pod that refuses exec entirely, so
+# giving up on the first one would silently drop whole namespaces from
+# the map. Scanning continues past a usable-but-weak tool in the hope of
+# finding curl, which is the only one that separates an open non-HTTP
+# port from a dropped packet; anything else falls back to timing.
+#
+# Echoes "pod<TAB>container<TAB>tool", or nothing if the namespace has no
+# usable vantage point at all.
+select_source() {
+  local ns="$1" checked=0
+  local best_pod="" best_ctr="" best_tool=""
+  local pod ctr tool
+
+  while IFS=$'\t' read -r pod ctr; do
+    [[ -n "$pod" && -n "$ctr" ]] || continue
+    (( checked >= MAX_CANDIDATES )) && break
+    checked=$(( checked + 1 ))
+
+    tool="$(detect_tool "$ns" "$pod" "$ctr")"
+    case "$tool" in
+      curl)
+        printf '%s\t%s\t%s\n' "$pod" "$ctr" "$tool"   # best available, stop
+        return 0 ;;
+      wget|nc|devtcp)
+        if [[ -z "$best_tool" ]]; then
+          best_pod="$pod"; best_ctr="$ctr"; best_tool="$tool"
+        fi ;;
+      *) : ;;   # none / noexec - keep looking
+    esac
+  done < <(candidates "$ns")
+
+  if [[ -n "$best_tool" ]]; then
+    echo "no curl found in $ns after $checked container(s); using $best_tool in $best_pod" >&2
+    printf '%s\t%s\t%s\n' "$best_pod" "$best_ctr" "$best_tool"
+    return 0
+  fi
+  return 1
 }
 
 # Which connect tool does this container actually have?
@@ -185,16 +233,12 @@ probe_other() {
 
 # Emits raw TSV rows; the callers below format them.
 probe_rows() {
+  local src pod ctr tool dst svc port proto fqdn res
   while read -r src; do
     [[ -n "$src" ]] || continue
-    read -r pod ctr < <(pick_pod "$src") || true
-    if [[ -z "${pod:-}" ]]; then
-      echo "no Running pod to borrow in namespace $src - skipping" >&2
-      continue
-    fi
-    tool="$(detect_tool "$src" "$pod" "$ctr")"
-    if [[ "$tool" == "none" || "$tool" == "noexec" ]]; then
-      echo "pod $src/$pod ($ctr) has no curl/wget/nc/bash - cannot probe from it" >&2
+
+    if ! read -r pod ctr tool < <(select_source "$src"); then
+      echo "namespace $src: no Running pod with curl/wget/nc/bash (checked up to $MAX_CANDIDATES containers) - cannot probe FROM it" >&2
       continue
     fi
 
@@ -207,8 +251,8 @@ probe_rows() {
         else
           res="$(probe_other "$src" "$pod" "$ctr" "$fqdn" "$port" "$tool")"
         fi
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-          "$src" "$pod" "$tool" "$dst" "$svc" "$fqdn" "$port" "$res"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$src" "$pod" "$ctr" "$tool" "$dst" "$svc" "$fqdn" "$port" "$res"
       done < <(services_in "$dst")
     done < <(ns_list "$TO")
   done < <(ns_list "$FROM")
@@ -227,10 +271,10 @@ probe_rows() {
 #   UNKNOWN   only DNS failures or errors; nothing was actually tested
 summarize() {
   awk -F'\t' '
-    { pair = $1 " -> " $4
+    { pair = $1 " -> " $5
       if (!(pair in seen)) { seen[pair] = 1; order[++n] = pair }
       total[pair]++
-      c[pair "|" $8]++
+      c[pair "|" $9]++
     }
     END {
       for (i = 1; i <= n; i++) {
@@ -256,9 +300,9 @@ if [[ $SUMMARY -eq 1 ]]; then
         done
   } | render
 else
-  { row SRC_NS SRC_POD TOOL DST_NS DST_SVC FQDN PORT RESULT
-    probe_rows | while IFS=$'\t' read -r a b cc d e f g h; do
-      row "$a" "$b" "$cc" "$d" "$e" "$f" "$g" "$h"
+  { row SRC_NS SRC_POD SRC_CTR TOOL DST_NS DST_SVC FQDN PORT RESULT
+    probe_rows | while IFS=$'\t' read -r a b cc d e f g h i; do
+      row "$a" "$b" "$cc" "$d" "$e" "$f" "$g" "$h" "$i"
     done
   } | render
 fi
