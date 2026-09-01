@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# illumio-labels.sh - extract Illumio-related annotations from
+# map_annotations.sh - extract Illumio-related annotations from
 # Kubernetes namespaces and services.
 #
 # Namespaces are read for the namespaceoperator annotations:
@@ -8,6 +8,10 @@
 #   namespaceoperator.<ORG>/code_app
 #   namespaceoperator.<ORG>/environment
 #   namespaceoperator.<ORG>/middleware
+#
+# <ORG> is tenant-specific and varies between clusters, so the default
+# namespace prefix is the glob "namespaceoperator.*": whatever follows the
+# dot is matched, as long as it does not cross the "/" separator.
 #
 # Services are read for the anp keys:
 #   anp/appcode
@@ -23,9 +27,11 @@
 set -euo pipefail
 
 # --- configuration -----------------------------------------------------
-# The namespace-annotation prefix is tenant-specific. Override with
-# --ns-prefix or the ILLUMIO_NS_PREFIX environment variable.
-NS_PREFIX="${ILLUMIO_NS_PREFIX:-namespaceoperator.ap24182}"
+# Prefixes are globs: "*" matches any run of characters except "/", every
+# other character is literal. Override with --ns-prefix/--svc-prefix or the
+# ILLUMIO_NS_PREFIX/ILLUMIO_SVC_PREFIX environment variables. A prefix
+# without "*" (e.g. namespaceoperator.ap24182) still matches exactly.
+NS_PREFIX="${ILLUMIO_NS_PREFIX:-namespaceoperator.*}"
 SVC_PREFIX="${ILLUMIO_SVC_PREFIX:-anp}"
 
 NS_KEYS=(applicative_tier code_app environment middleware)
@@ -48,9 +54,14 @@ Options:
   -n, --namespace <ns>    limit to one namespace           (default: all namespaces)
   -o, --output <fmt>      table | csv | json               (default: table)
   -m, --missing-only      only rows where at least one key is absent
-      --ns-prefix <p>     namespace annotation prefix      (default: ${NS_PREFIX})
-      --svc-prefix <p>    service annotation prefix        (default: ${SVC_PREFIX})
+      --ns-prefix <p>     namespace annotation prefix glob (default: ${NS_PREFIX})
+      --svc-prefix <p>    service annotation prefix glob   (default: ${SVC_PREFIX})
   -h, --help              show this help
+
+Prefixes are globs where "*" matches anything up to the "/" separator, so
+the default matches namespaceoperator.<any-org>/<key>. Pin a single tenant
+with --ns-prefix namespaceoperator.ap24182. When more than one prefix
+carries the same key on one object, the values are joined with ",".
 
 Examples:
   ${0##*/}                                   # everything, as a table
@@ -90,33 +101,56 @@ done
 
 # --- helpers -----------------------------------------------------------
 
-# Build a comma-separated list of jq value expressions, one per key,
-# read from .metadata.annotations only.
+# Turn a glob into a regex fragment safe to paste inside a jq string
+# literal: "*" becomes [^/]*, regex metacharacters are escaped, and the
+# escaping backslash is doubled because jq re-reads the string first.
+glob_to_regex() {
+  local glob="$1" out="" i c
+  for (( i = 0; i < ${#glob}; i++ )); do
+    c="${glob:i:1}"
+    case "$c" in
+      '*')                              out+='[^/]*' ;;
+      '.'|'\'|'+'|'?'|'('|')'|'['|']'|'{'|'}'|'^'|'$'|'|'|'-') out+="\\\\$c" ;;
+      *)                                out+="$c" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# jq expression yielding the array of annotation values whose key matches
+# <prefix-glob>/<key>. Reads .metadata.annotations only.
+jq_match_expr() {
+  local prefix_re="$1" key_re="$2"
+  printf '((.metadata.annotations // {}) | to_entries | map(select(.key | test("^%s/%s$")) | .value))' \
+    "$prefix_re" "$key_re"
+}
+
+# Build a comma-separated list of jq value expressions, one per key.
 jq_value_exprs() {
-  local prefix="$1"; shift
+  local prefix_re; prefix_re="$(glob_to_regex "$1")"; shift
   local out="" k
   for k in "$@"; do
-    out+="(.metadata.annotations[\"${prefix}/${k}\"] // \"${MISSING_PLACEHOLDER}\"),"
+    out+="($(jq_match_expr "$prefix_re" "$(glob_to_regex "$k")") | if length == 0 then \"${MISSING_PLACEHOLDER}\" else join(\",\") end),"
   done
   printf '%s' "${out%,}"
 }
 
 # Build a jq object mapping bare key name -> value, for JSON output.
 jq_object_expr() {
-  local prefix="$1"; shift
+  local prefix_re; prefix_re="$(glob_to_regex "$1")"; shift
   local out="" k
   for k in "$@"; do
-    out+="\"${k}\": (.metadata.annotations[\"${prefix}/${k}\"] // null),"
+    out+="\"${k}\": ($(jq_match_expr "$prefix_re" "$(glob_to_regex "$k")") | if length == 0 then null else join(\",\") end),"
   done
   printf '{%s}' "${out%,}"
 }
 
 # jq boolean: true when at least one of the keys is absent.
 jq_missing_expr() {
-  local prefix="$1"; shift
+  local prefix_re; prefix_re="$(glob_to_regex "$1")"; shift
   local out="" k
   for k in "$@"; do
-    out+="(.metadata.annotations[\"${prefix}/${k}\"]) == null or "
+    out+="($(jq_match_expr "$prefix_re" "$(glob_to_regex "$k")") | length) == 0 or "
   done
   printf '(%s)' "${out%or }"
 }
@@ -130,25 +164,31 @@ kubectl_get() {
   fi
 }
 
-render_table() { column -t -s $'\t'; }
+# column(1) is not present everywhere (busybox images, minimal jump hosts);
+# fall back to the raw tab-separated rows rather than dying.
+render_table() {
+  if command -v column >/dev/null 2>&1; then column -t -s $'\t'; else cat; fi
+}
 render_csv()   { cat; }
 
 # --- namespaces --------------------------------------------------------
-emit_namespaces_rows() {
-  local sep="$1"     # tsv | csv
-  local filter="."
-  [[ $MISSING_ONLY -eq 1 ]] && filter="select($(jq_missing_expr "$NS_PREFIX" "${NS_KEYS[@]}"))"
-
-  # A single namespace is fetched with `kubectl get ns <name>` semantics via
-  # the same all-namespaces call; namespaces are cluster-scoped so -n is
-  # meaningless and we filter by name instead.
+get_namespaces_json() {
+  # Namespaces are cluster-scoped so -n is meaningless; filter by name.
   local ns_json
   ns_json="$(kubectl get namespaces -o json)"
   if [[ -n "$NAMESPACE" ]]; then
     ns_json="$(jq --arg n "$NAMESPACE" '.items |= map(select(.metadata.name == $n))' <<<"$ns_json")"
   fi
+  printf '%s' "$ns_json"
+}
 
-  jq -r ".items[] | ${filter} | [.metadata.name, $(jq_value_exprs "$NS_PREFIX" "${NS_KEYS[@]}")] | @${sep}" <<<"$ns_json"
+emit_namespaces_rows() {
+  local sep="$1"     # tsv | csv
+  local filter="."
+  [[ $MISSING_ONLY -eq 1 ]] && filter="select($(jq_missing_expr "$NS_PREFIX" "${NS_KEYS[@]}"))"
+
+  jq -r ".items[] | ${filter} | [.metadata.name, $(jq_value_exprs "$NS_PREFIX" "${NS_KEYS[@]}")] | @${sep}" \
+    <<<"$(get_namespaces_json)"
 }
 
 emit_namespaces() {
@@ -172,13 +212,8 @@ emit_namespaces_json() {
   local filter="."
   [[ $MISSING_ONLY -eq 1 ]] && filter="select($(jq_missing_expr "$NS_PREFIX" "${NS_KEYS[@]}"))"
 
-  local ns_json
-  ns_json="$(kubectl get namespaces -o json)"
-  if [[ -n "$NAMESPACE" ]]; then
-    ns_json="$(jq --arg n "$NAMESPACE" '.items |= map(select(.metadata.name == $n))' <<<"$ns_json")"
-  fi
-
-  jq "[.items[] | ${filter} | {name: .metadata.name, annotations: $(jq_object_expr "$NS_PREFIX" "${NS_KEYS[@]}")}]" <<<"$ns_json"
+  jq "[.items[] | ${filter} | {name: .metadata.name, annotations: $(jq_object_expr "$NS_PREFIX" "${NS_KEYS[@]}")}]" \
+    <<<"$(get_namespaces_json)"
 }
 
 # --- services ----------------------------------------------------------
