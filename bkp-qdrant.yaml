@@ -6,7 +6,7 @@ metadata:
   namespace: data
 spec:
   entrypoint: backup
-  serviceAccountName: vectordb-backup-sa
+  serviceAccountName: vectordb-backup-sa   # bound to Vault role
   arguments:
     parameters:
       - name: db-type
@@ -20,15 +20,30 @@ spec:
         template: create-snapshot
 
   - name: create-snapshot
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "vectordb-backup"
+        vault.hashicorp.com/agent-inject-secret-qdrant: "secret/data/qdrant"
+        vault.hashicorp.com/agent-inject-template-qdrant: |
+          {{- with secret "secret/data/qdrant" -}}
+          export QDRANT_API_KEY="{{ .Data.data.api_key }}"
+          {{- end }}
+        vault.hashicorp.com/agent-inject-secret-minio: "secret/data/minio"
+        vault.hashicorp.com/agent-inject-template-minio: |
+          {{- with secret "secret/data/minio" -}}
+          export AWS_ACCESS_KEY_ID="{{ .Data.data.access_key }}"
+          export AWS_SECRET_ACCESS_KEY="{{ .Data.data.secret_key }}"
+          {{- end }}
+        vault.hashicorp.com/agent-pre-populate-only: "true"  # sidecar exits after populate
     script:
       image: curlimages/curl:8.9.1
       command: [sh]
-      env:
-      - name: QDRANT_API_KEY
-        valueFrom:
-          secretKeyRef: {name: qdrant-auth, key: api-key}
       source: |
         set -e
+        . /vault/secrets/qdrant
+        . /vault/secrets/minio
+
         if [ "{{workflow.parameters.db-type}}" = "qdrant" ]; then
           curl -sX POST http://qdrant:6333/snapshots \
             -H "api-key: $QDRANT_API_KEY" -o /dev/null
@@ -47,17 +62,3 @@ spec:
         archive: {none: {}}
         s3:
           key: "{{workflow.parameters.snapshot-name}}/snapshot.data"
-          # bucket/endpoint/secret inherited from artifactRepositoryRef
-          # or override here explicitly if no default configured:
-          # endpoint: minio.minio.svc:9000
-          # bucket: vectordb-backups
-          # insecure: true
-          # accessKeySecret: {name: minio-credentials, key: accesskey}
-          # secretKeySecret: {name: minio-credentials, key: secretkey}
----
-apiVersion: v1
-kind: Secret
-metadata: {name: qdrant-auth, namespace: data}
-type: Opaque
-stringData:
-  api-key: CHANGE_ME   # inject via Vault/ExternalSecret
