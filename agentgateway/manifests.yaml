@@ -1,0 +1,133 @@
+# agentgateway MCP demo - raw Kubernetes manifests
+# Live on the cluster in namespace agentgateway-demo, deployed via GitOps
+# (source of truth: apps/workloads/agentgateway-demo/values.yaml in
+# ayoubelmaaradi/devsecops, wrapped in a bjw-s/app-template `rawResources`
+# block - these are that block's manifests, unwrapped, in apply order).
+# Endpoint: https://agentgateway-demo.89.117.54.54.nip.io:8090/mcp
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: agentgateway-demo-tls
+  namespace: agentgateway-demo
+spec:
+  secretName: agentgateway-demo-tls
+  dnsNames:
+    - agentgateway-demo.89.117.54.54.nip.io
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayParameters
+metadata:
+  name: agentgateway-demo
+  namespace: agentgateway-demo
+spec:
+  service:
+    spec:
+      type: LoadBalancer
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: agentgateway-demo
+  namespace: agentgateway-demo
+spec:
+  gatewayClassName: agentgateway
+  infrastructure:
+    parametersRef:
+      group: agentgateway.dev
+      kind: AgentgatewayParameters
+      name: agentgateway-demo
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 8090
+      hostname: agentgateway-demo.89.117.54.54.nip.io
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: agentgateway-demo-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-website-fetcher
+  namespace: agentgateway-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-website-fetcher
+  template:
+    metadata:
+      labels:
+        app: mcp-website-fetcher
+    spec:
+      containers:
+        - name: mcp-website-fetcher
+          image: ghcr.io/peterj/mcp-website-fetcher:main
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-website-fetcher
+  namespace: agentgateway-demo
+  labels:
+    app: mcp-website-fetcher
+spec:
+  selector:
+    app: mcp-website-fetcher
+  ports:
+    - port: 80
+      targetPort: 8000
+      # Tells agentgateway this Service speaks MCP.
+      appProtocol: agentgateway.dev/mcp
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-backend
+  namespace: agentgateway-demo
+spec:
+  mcp:
+    targets:
+      - name: mcp-target
+        static:
+          backendRef:
+            name: mcp-website-fetcher
+          port: 80
+          protocol: SSE
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp
+  namespace: agentgateway-demo
+spec:
+  parentRefs:
+    - name: agentgateway-demo
+      sectionName: https
+  hostnames:
+    - agentgateway-demo.89.117.54.54.nip.io
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /mcp
+      backendRefs:
+        - name: mcp-backend
+          group: agentgateway.dev
+          kind: AgentgatewayBackend
