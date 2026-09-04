@@ -1,241 +1,123 @@
 apiVersion: argoproj.io/v1alpha1
 kind: WorkflowTemplate
 metadata:
-  annotations:
-    argocd.argoproj.io/tracking-id: >-
-      argo-workflows-config:argoproj.io/WorkflowTemplate:argo-workflows/qdrant-backup-demo
-  creationTimestamp: '2026-09-03T23:24:41Z'
-  generation: 3
-  labels:
-    app.kubernetes.io/instance: argo-workflows-config
-    app.kubernetes.io/managed-by: Helm
-    app.kubernetes.io/name: argo-workflows-config
-    helm.sh/chart: app-template-5.1.0
   name: qdrant-backup-demo
   namespace: argo-workflows
-  resourceVersion: '6376075'
-  uid: bd62bc36-730a-4068-8d75-fdb6add66587
 spec:
   arguments:
     parameters:
-      - name: collection
-        value: demo
+    - name: collection
+      value: demo
   entrypoint: lifecycle
   serviceAccountName: qdrant-backup
   templates:
-    - name: lifecycle
-      steps:
-        - - name: add-data
-            template: add-data
-        - - name: backup
-            template: backup-snapshot
-        - - arguments:
-              parameters:
-                - name: snapshot-name
-                  value: '{{steps.backup.outputs.parameters.snapshot-name}}'
-            name: verify-backup
-            template: verify-backup
-    - container:
-        args:
-          - |
-            set -eu
-            KEY="$(cat /vault/secrets/qdrant-api-key)"
-            HOST="qdrant.qdrant.svc.cluster.local"
-            COLL="{{workflow.parameters.collection}}"
-            echo "creating collection $COLL"
-            curl -sf -X PUT "http://$HOST:6333/collections/$COLL" \
-              -H "api-key: $KEY" -H "content-type: application/json" \
-              -d '{"vectors":{"size":4,"distance":"Cosine"}}'
-            echo
-            echo "upserting points"
-            curl -sf -X PUT "http://$HOST:6333/collections/$COLL/points" \
-              -H "api-key: $KEY" -H "content-type: application/json" \
-              -d '{"points":[
-                    {"id":1,"vector":[0.05,0.61,0.76,0.74],"payload":{"city":"Berlin"}},
-                    {"id":2,"vector":[0.19,0.81,0.75,0.11],"payload":{"city":"Paris"}},
-                    {"id":3,"vector":[0.36,0.55,0.47,0.94],"payload":{"city":"London"}}
-                  ]}'
-            echo
-            echo "done"
-        command:
-          - sh
-          - '-c'
-        image: >-
-          curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
-        resources:
-          limits:
-            cpu: 200m
-            memory: 64Mi
-          requests:
-            cpu: 25m
-            memory: 32Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - ALL
-          privileged: false
-          readOnlyRootFilesystem: true
-          runAsGroup: 1000
-          runAsNonRoot: true
-          runAsUser: 1000
-          seccompProfile:
-            type: RuntimeDefault
-      metadata:
-        annotations:
-          vault.hashicorp.com/agent-inject: 'true'
-          vault.hashicorp.com/agent-inject-secret-qdrant-api-key: secret/data/apps/qdrant/api-key
-          vault.hashicorp.com/agent-inject-template-qdrant-api-key: >
-            {{- with secret "secret/data/apps/qdrant/api-key" -}}{{
-            .Data.data.API_KEY }}{{- end -}}
-          vault.hashicorp.com/agent-pre-populate-only: 'true'
-          vault.hashicorp.com/role: qdrant-workflow
-      name: add-data
-      retryStrategy:
-        limit: '2'
-        retryPolicy: OnError
-    - container:
-        args:
-          - >
-            set -eu
 
-            KEY="$(cat /vault/secrets/qdrant-api-key)"
-
-            HOST="qdrant.qdrant.svc.cluster.local"
-
-            COLL="{{workflow.parameters.collection}}"
-
-            echo "creating snapshot for $COLL"
-
-            RESP="$(curl -sf -X POST
-            "http://$HOST:6333/collections/$COLL/snapshots?wait=true" -H
-            "api-key: $KEY")"
-
-            echo "$RESP"
-
-            NAME="$(echo "$RESP" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
-
-            if [ -z "$NAME" ]; then
-              echo "could not parse a snapshot name out of the response above" >&2
-              exit 1
-            fi
-
-            echo "$NAME" > /tmp/snapshot-name.txt
-        command:
-          - sh
-          - '-c'
-        image: >-
-          curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
-        resources:
-          limits:
-            cpu: 200m
-            memory: 64Mi
-          requests:
-            cpu: 25m
-            memory: 32Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - ALL
-          privileged: false
-          readOnlyRootFilesystem: true
-          runAsGroup: 1000
-          runAsNonRoot: true
-          runAsUser: 1000
-          seccompProfile:
-            type: RuntimeDefault
-        volumeMounts:
-          - mountPath: /tmp
-            name: tmp
-      metadata:
-        annotations:
-          vault.hashicorp.com/agent-inject: 'true'
-          vault.hashicorp.com/agent-inject-secret-qdrant-api-key: secret/data/apps/qdrant/api-key
-          vault.hashicorp.com/agent-inject-template-qdrant-api-key: >
-            {{- with secret "secret/data/apps/qdrant/api-key" -}}{{
-            .Data.data.API_KEY }}{{- end -}}
-          vault.hashicorp.com/agent-pre-populate-only: 'true'
-          vault.hashicorp.com/role: qdrant-workflow
-      name: backup-snapshot
-      outputs:
-        parameters:
+  - name: lifecycle
+    steps:
+    - - name: backup
+        template: backup-snapshot
+    - - name: push
+        template: push-to-minio
+        arguments:
+          parameters:
           - name: snapshot-name
-            valueFrom:
-              path: /tmp/snapshot-name.txt
-      retryStrategy:
-        limit: '2'
-        retryPolicy: OnError
-    - container:
-        args:
-          - >
-            set -eu
+            value: '{{steps.backup.outputs.parameters.snapshot-name}}'
 
-            AK="$(cat /vault/secrets/minio-access-key)"
+  # Step 1: Qdrant creates a LOCAL snapshot only — no S3 involved here
+  - name: backup-snapshot
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/role: qdrant-workflow
+        vault.hashicorp.com/agent-inject-secret-qdrant-api-key: secret/data/apps/qdrant/api-key
+        vault.hashicorp.com/agent-inject-template-qdrant-api-key: |
+          {{- with secret "secret/data/apps/qdrant/api-key" -}}{{ .Data.data.API_KEY }}{{- end -}}
+    container:
+      image: curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+      command: ["sh", "-c"]
+      args:
+      - |
+        set -eu
+        KEY="$(cat /vault/secrets/qdrant-api-key)"
+        HOST="qdrant.qdrant.svc.cluster.local"
+        COLL="{{workflow.parameters.collection}}"
+        echo "creating snapshot for $COLL"
+        RESP="$(curl -sf -X POST "http://$HOST:6333/collections/$COLL/snapshots?wait=true" -H "api-key: $KEY")"
+        echo "$RESP"
+        NAME="$(echo "$RESP" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')"
+        if [ -z "$NAME" ]; then
+          echo "could not parse a snapshot name out of the response above" >&2
+          exit 1
+        fi
+        echo "$NAME" > /tmp/snapshot-name.txt
+      volumeMounts:
+      - {name: tmp, mountPath: /tmp}
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false, privileged: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+    retryStrategy: {limit: "2", retryPolicy: OnError}
+    outputs:
+      parameters:
+      - name: snapshot-name
+        valueFrom: {path: /tmp/snapshot-name.txt}
 
-            SK="$(cat /vault/secrets/minio-secret-key)"
+  # Step 2: download from Qdrant, push to MinIO — one pod, two containers
+  - name: push-to-minio
+    inputs:
+      parameters:
+      - name: snapshot-name
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/agent-init-first: "true"   # required — see below
+        vault.hashicorp.com/role: qdrant-workflow
+        vault.hashicorp.com/agent-inject-secret-qdrant-api-key: secret/data/apps/qdrant/api-key
+        vault.hashicorp.com/agent-inject-template-qdrant-api-key: |
+          {{- with secret "secret/data/apps/qdrant/api-key" -}}{{ .Data.data.API_KEY }}{{- end -}}
+        vault.hashicorp.com/agent-inject-secret-minio-access-key: secret/data/apps/minio/qdrant-backup-credentials
+        vault.hashicorp.com/agent-inject-template-minio-access-key: |
+          {{- with secret "secret/data/apps/minio/qdrant-backup-credentials" -}}{{ .Data.data.QDRANT_BACKUP_ACCESS_KEY }}{{- end -}}
+        vault.hashicorp.com/agent-inject-secret-minio-secret-key: secret/data/apps/minio/qdrant-backup-credentials
+        vault.hashicorp.com/agent-inject-template-minio-secret-key: |
+          {{- with secret "secret/data/apps/minio/qdrant-backup-credentials" -}}{{ .Data.data.QDRANT_BACKUP_SECRET_KEY }}{{- end -}}
+    initContainers:
+    - name: download
+      image: curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+      command: ["sh", "-c"]
+      args:
+      - |
+        set -eu
+        KEY="$(cat /vault/secrets/qdrant-api-key)"
+        HOST="qdrant.qdrant.svc.cluster.local"
+        COLL="{{workflow.parameters.collection}}"
+        NAME="{{inputs.parameters.snapshot-name}}"
+        echo "downloading $NAME"
+        curl -sf -H "api-key: $KEY" -o "/work/$NAME" "http://$HOST:6333/collections/$COLL/snapshots/$NAME"
+        ls -la "/work/$NAME"
+      volumeMounts: [{name: work, mountPath: /work}]
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false, privileged: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+    container:
+      image: minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+      command: ["sh", "-c"]
+      env: [{name: HOME, value: /tmp}]
+      args:
+      - |
+        set -eu
+        AK="$(cat /vault/secrets/minio-access-key)"
+        SK="$(cat /vault/secrets/minio-secret-key)"
+        COLL="{{workflow.parameters.collection}}"
+        NAME="{{inputs.parameters.snapshot-name}}"
+        mc alias set b "http://minio.minio.svc.cluster.local:9000" "$AK" "$SK"
+        echo "pushing to qdrant-backups/snapshots/$COLL/$NAME"
+        mc cp "/work/$NAME" "b/qdrant-backups/snapshots/$COLL/$NAME"
+        mc stat "b/qdrant-backups/snapshots/$COLL/$NAME"
+      volumeMounts: [{name: tmp, mountPath: /tmp}, {name: work, mountPath: /work}]
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false, privileged: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+    retryStrategy: {limit: "2", retryPolicy: OnError}
 
-            mc alias set b "http://minio.minio.svc.cluster.local:9000" "$AK"
-            "$SK"
-
-            COLL="{{workflow.parameters.collection}}"
-
-            OBJ="snapshots/$COLL/{{inputs.parameters.snapshot-name}}"
-
-            echo "checking qdrant-backups/$OBJ"
-
-            mc stat "b/qdrant-backups/$OBJ"
-        command:
-          - sh
-          - '-c'
-        env:
-          - name: HOME
-            value: /tmp
-        image: >-
-          minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
-        resources:
-          limits:
-            cpu: 200m
-            memory: 64Mi
-          requests:
-            cpu: 25m
-            memory: 32Mi
-        securityContext:
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-              - ALL
-          privileged: false
-          readOnlyRootFilesystem: true
-          runAsGroup: 1000
-          runAsNonRoot: true
-          runAsUser: 1000
-          seccompProfile:
-            type: RuntimeDefault
-        volumeMounts:
-          - mountPath: /tmp
-            name: tmp
-      inputs:
-        parameters:
-          - name: snapshot-name
-      metadata:
-        annotations:
-          vault.hashicorp.com/agent-inject: 'true'
-          vault.hashicorp.com/agent-inject-secret-minio-access-key: secret/data/apps/minio/qdrant-backup-credentials
-          vault.hashicorp.com/agent-inject-secret-minio-secret-key: secret/data/apps/minio/qdrant-backup-credentials
-          vault.hashicorp.com/agent-inject-template-minio-access-key: >
-            {{- with secret "secret/data/apps/minio/qdrant-backup-credentials"
-            -}}{{ .Data.data.QDRANT_BACKUP_ACCESS_KEY }}{{- end -}}
-          vault.hashicorp.com/agent-inject-template-minio-secret-key: >
-            {{- with secret "secret/data/apps/minio/qdrant-backup-credentials"
-            -}}{{ .Data.data.QDRANT_BACKUP_SECRET_KEY }}{{- end -}}
-          vault.hashicorp.com/agent-pre-populate-only: 'true'
-          vault.hashicorp.com/role: qdrant-workflow
-      name: verify-backup
-      retryStrategy:
-        limit: '2'
-        retryPolicy: OnError
   volumes:
-    - emptyDir:
-        sizeLimit: 32Mi
-      name: tmp
+  - {name: tmp, emptyDir: {sizeLimit: 32Mi}}
+  - {name: work, emptyDir: {sizeLimit: 512Mi}}
