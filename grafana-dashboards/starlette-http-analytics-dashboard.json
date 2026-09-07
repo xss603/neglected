@@ -4,7 +4,7 @@
   "annotations": {
     "list": []
   },
-  "description": "HTTP analytics for services instrumented with starlette-exporter (starlette_requests_total, _processing_time_seconds, _in_progress, exceptions_total)",
+  "description": "HTTP analytics and pod resource usage for services instrumented with starlette-exporter (starlette_requests_total, _processing_time_seconds, _in_progress, exceptions_total); pods are matched by the \"$service\" name prefix.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -76,7 +76,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum(rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -96,22 +96,20 @@
           "unit": "percentunit",
           "thresholds": {
             "mode": "absolute",
-            "steps": {
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                },
-                {
-                  "color": "yellow",
-                  "value": 0.01
-                },
-                {
-                  "color": "red",
-                  "value": 0.05
-                }
-              ]
-            }
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.01
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
           }
         },
         "overrides": []
@@ -145,7 +143,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))\n/\nsum(rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum(rate(starlette_requests_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))\n/\nsum(rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -204,7 +202,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(starlette_requests_in_progress{app_name=~\"$app_name\"})",
+          "expr": "sum(starlette_requests_in_progress{service=~\"$service\"})",
           "legendFormat": "",
           "refId": "A"
         }
@@ -224,22 +222,20 @@
           "unit": "s",
           "thresholds": {
             "mode": "absolute",
-            "steps": {
-              "steps": [
-                {
-                  "color": "green",
-                  "value": null
-                },
-                {
-                  "color": "yellow",
-                  "value": 0.5
-                },
-                {
-                  "color": "red",
-                  "value": 1
-                }
-              ]
-            }
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.5
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
           }
         },
         "overrides": []
@@ -273,7 +269,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{service=~\"$service\", method=~\"$method\"}[$__rate_interval])))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -335,7 +331,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (path) (rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (path) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "{{path}}",
           "refId": "A"
         }
@@ -385,7 +381,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status_code) (rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (status_code) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "{{status_code}}",
           "refId": "A"
         }
@@ -435,7 +431,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (method) (rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (method) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "{{method}}",
           "refId": "A"
         }
@@ -450,6 +446,126 @@
         "y": 23
       },
       "id": 10,
+      "title": "Status Codes",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 24
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true,
+          "values": [
+            "value",
+            "percent"
+          ]
+        },
+        "pieType": "donut",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "desc"
+        }
+      },
+      "title": "Requests by Status Code (share, selected range)",
+      "type": "piechart",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (status_code) (increase(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
+          "legendFormat": "{{status_code}}",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "continuous-BlPu"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 24
+      },
+      "id": 12,
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true
+      },
+      "title": "Request Count by Status Code",
+      "type": "bargauge",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (status_code) (increase(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
+          "legendFormat": "{{status_code}}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "id": 13,
       "title": "Latency",
       "type": "row"
     },
@@ -471,9 +587,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 33
       },
-      "id": 11,
+      "id": 14,
       "options": {
         "legend": {
           "calcs": [
@@ -497,7 +613,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{service=~\"$service\", method=~\"$method\"}[$__rate_interval])))",
           "legendFormat": "p50",
           "refId": "A"
         },
@@ -506,7 +622,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.90, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.90, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{service=~\"$service\", method=~\"$method\"}[$__rate_interval])))",
           "legendFormat": "p90",
           "refId": "B"
         },
@@ -515,7 +631,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{service=~\"$service\", method=~\"$method\"}[$__rate_interval])))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -539,9 +655,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 33
       },
-      "id": 12,
+      "id": 15,
       "options": {
         "legend": {
           "calcs": [
@@ -565,7 +681,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (path) (rate(starlette_requests_processing_time_seconds_sum{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))\n/\nsum by (path) (rate(starlette_requests_processing_time_seconds_count{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (path) (rate(starlette_requests_processing_time_seconds_sum{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))\n/\nsum by (path) (rate(starlette_requests_processing_time_seconds_count{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "{{path}}",
           "refId": "A"
         }
@@ -586,9 +702,9 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 41
       },
-      "id": 13,
+      "id": 16,
       "options": {
         "calculate": false,
         "cellGap": 1,
@@ -609,7 +725,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (le) (rate(starlette_requests_processing_time_seconds_bucket{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "format": "heatmap",
           "legendFormat": "{{le}}",
           "refId": "A"
@@ -622,9 +738,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       },
-      "id": 14,
+      "id": 17,
       "title": "Errors",
       "type": "row"
     },
@@ -646,9 +762,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 50
       },
-      "id": 15,
+      "id": 18,
       "options": {
         "legend": {
           "calcs": [
@@ -672,7 +788,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (path) (rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))",
+          "expr": "sum by (path) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))",
           "legendFormat": "{{path}}",
           "refId": "A"
         }
@@ -696,9 +812,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 50
       },
-      "id": 16,
+      "id": 19,
       "options": {
         "legend": {
           "calcs": [
@@ -722,7 +838,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (exception_class) (rate(starlette_exceptions_total{app_name=~\"$app_name\"}[$__rate_interval]))",
+          "expr": "sum by (exception_class) (rate(starlette_exceptions_total{service=~\"$service\"}[$__rate_interval]))",
           "legendFormat": "{{exception_class}}",
           "refId": "A"
         }
@@ -734,9 +850,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 58
       },
-      "id": 17,
+      "id": 20,
       "title": "Top Endpoints",
       "type": "row"
     },
@@ -755,9 +871,9 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 50
+        "y": 59
       },
-      "id": 18,
+      "id": 21,
       "options": {
         "showHeader": true,
         "sortBy": [
@@ -775,7 +891,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10, sum by (path) (rate(starlette_requests_total{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval])))",
+          "expr": "topk(10, sum by (path) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval])))",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -797,9 +913,9 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 50
+        "y": 59
       },
-      "id": 19,
+      "id": 22,
       "options": {
         "showHeader": true,
         "sortBy": [
@@ -817,9 +933,373 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "topk(10,\n  sum by (path) (rate(starlette_requests_processing_time_seconds_sum{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))\n  /\n  sum by (path) (rate(starlette_requests_processing_time_seconds_count{app_name=~\"$app_name\", method=~\"$method\"}[$__rate_interval]))\n)",
+          "expr": "topk(10,\n  sum by (path) (rate(starlette_requests_processing_time_seconds_sum{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))\n  /\n  sum by (path) (rate(starlette_requests_processing_time_seconds_count{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))\n)",
           "format": "table",
           "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "id": 23,
+      "title": "Pod Resources (pods prefixed \"$service\")",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 68
+      },
+      "id": 24,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Total CPU Usage",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"}[$__rate_interval]))",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 68
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Total Memory Usage",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 68
+      },
+      "id": 26,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "CPU Usage vs Requested",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"}[$__rate_interval]))\n/\nsum(kube_pod_container_resource_requests{namespace=~\"$namespace\", pod=~\"$service.*\", resource=\"cpu\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 68
+      },
+      "id": 27,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Memory Usage vs Requested",
+      "type": "stat",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(container_memory_working_set_bytes{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"})\n/\nsum(kube_pod_container_resource_requests{namespace=~\"$namespace\", pod=~\"$service.*\", resource=\"memory\"})",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 73
+      },
+      "id": 28,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "CPU Usage by Pod",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"}[$__rate_interval]))",
+          "legendFormat": "{{pod}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 73
+      },
+      "id": 29,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "title": "Memory Usage by Pod",
+      "type": "timeseries",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (pod) (container_memory_working_set_bytes{namespace=~\"$namespace\", pod=~\"$service.*\", container!=\"\", container!=\"POD\"})",
+          "legendFormat": "{{pod}}",
           "refId": "A"
         }
       ]
@@ -852,19 +1332,19 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(starlette_requests_total, app_name)",
+        "definition": "label_values(starlette_requests_total, service)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
-        "name": "app_name",
+        "name": "service",
         "query": {
-          "query": "label_values(starlette_requests_total, app_name)",
+          "query": "label_values(starlette_requests_total, service)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
         "sort": 1,
         "type": "query",
-        "label": "App"
+        "label": "Service"
       },
       {
         "current": {},
@@ -872,19 +1352,39 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "label_values(starlette_requests_total{app_name=~\"$app_name\"}, method)",
+        "definition": "label_values(starlette_requests_total{service=~\"$service\"}, method)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "method",
         "query": {
-          "query": "label_values(starlette_requests_total{app_name=~\"$app_name\"}, method)",
+          "query": "label_values(starlette_requests_total{service=~\"$service\"}, method)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 2,
         "sort": 1,
         "type": "query",
         "label": "Method"
+      },
+      {
+        "current": {},
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(kube_pod_info, namespace)",
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "name": "namespace",
+        "query": {
+          "query": "label_values(kube_pod_info, namespace)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query",
+        "label": "Namespace"
       }
     ]
   },
@@ -896,5 +1396,5 @@
   "timezone": "",
   "title": "Starlette HTTP Analytics",
   "uid": "starlette-http-analytics",
-  "version": 1
+  "version": 2
 }
