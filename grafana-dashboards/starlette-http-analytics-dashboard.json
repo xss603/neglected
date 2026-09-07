@@ -4,7 +4,7 @@
   "annotations": {
     "list": []
   },
-  "description": "HTTP analytics and pod resource usage for services instrumented with starlette-exporter (starlette_requests_total, _processing_time_seconds, _in_progress, exceptions_total); pods are matched by the \"$service\" name prefix.",
+  "description": "HTTP analytics and pod resource usage for services instrumented with starlette-exporter (starlette_requests_total, starlette_responses_total for status codes, _processing_time_seconds, _in_progress, exceptions_total); pods are matched by the \"$service\" name prefix.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 1,
@@ -143,7 +143,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(starlette_requests_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))\n/\nsum(rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum(rate(starlette_responses_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))\n/\nsum(rate(starlette_responses_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "",
           "refId": "A"
         }
@@ -381,7 +381,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status_code) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
+          "expr": "sum by (status_code) (rate(starlette_responses_total{service=~\"$service\", method=~\"$method\"}[$__rate_interval]))",
           "legendFormat": "{{status_code}}",
           "refId": "A"
         }
@@ -501,7 +501,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status_code) (increase(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
+          "expr": "sum by (status_code) (increase(starlette_responses_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
           "legendFormat": "{{status_code}}",
           "instant": true,
           "refId": "A"
@@ -549,7 +549,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status_code) (increase(starlette_requests_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
+          "expr": "sum by (status_code) (increase(starlette_responses_total{service=~\"$service\", method=~\"$method\"}[$__range]))",
           "legendFormat": "{{status_code}}",
           "format": "table",
           "instant": true,
@@ -788,7 +788,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (path) (rate(starlette_requests_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))",
+          "expr": "sum by (path) (rate(starlette_responses_total{service=~\"$service\", method=~\"$method\", status_code=~\"5..\"}[$__rate_interval]))",
           "legendFormat": "{{path}}",
           "refId": "A"
         }
@@ -1396,5 +1396,5 @@
   "timezone": "",
   "title": "Starlette HTTP Analytics",
   "uid": "starlette-http-analytics",
-  "version": 2
+  "version": 3
 }
