@@ -1,0 +1,86 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: restore-qdrant-snapshots
+  namespace: argo-workflows
+spec:
+  arguments:
+    parameters:
+    - name: archive-key
+      value: archives/full-backup.tar.gz
+    - name: restore-suffix
+      value: ""
+  entrypoint: restore-archive
+  serviceAccountName: qdrant-restore
+  templates:
+  - name: restore-archive
+    metadata:
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-pre-populate-only: "true"
+        vault.hashicorp.com/agent-init-first: "true"
+        vault.hashicorp.com/role: qdrant-restore
+        vault.hashicorp.com/agent-inject-secret-qdrant-api-key: secret/data/apps/qdrant/api-key
+        vault.hashicorp.com/agent-inject-template-qdrant-api-key: |
+          {{- with secret "secret/data/apps/qdrant/api-key" -}}{{ .Data.data.API_KEY }}{{- end -}}
+        vault.hashicorp.com/agent-inject-secret-minio-access-key: secret/data/apps/minio/qdrant-backup-credentials
+        vault.hashicorp.com/agent-inject-template-minio-access-key: |
+          {{- with secret "secret/data/apps/minio/qdrant-backup-credentials" -}}{{ .Data.data.QDRANT_BACKUP_ACCESS_KEY }}{{- end -}}
+        vault.hashicorp.com/agent-inject-secret-minio-secret-key: secret/data/apps/minio/qdrant-backup-credentials
+        vault.hashicorp.com/agent-inject-template-minio-secret-key: |
+          {{- with secret "secret/data/apps/minio/qdrant-backup-credentials" -}}{{ .Data.data.QDRANT_BACKUP_SECRET_KEY }}{{- end -}}
+    initContainers:
+    - name: download
+      image: minio/mc@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
+      command: ["sh", "-c"]
+      env: [{name: HOME, value: /tmp}]
+      args:
+      - |
+        set -eu
+        AK="$(cat /vault/secrets/minio-access-key)"
+        SK="$(cat /vault/secrets/minio-secret-key)"
+        ARCHIVE="{{workflow.parameters.archive-key}}"
+        mc alias set b "http://minio.minio.svc.cluster.local:9000" "$AK" "$SK"
+        echo "downloading qdrant-backups/$ARCHIVE"
+        mc cp "b/qdrant-backups/$ARCHIVE" /work/archive.tar.gz
+        ls -la /work/archive.tar.gz
+      volumeMounts: [{name: tmp, mountPath: /tmp}, {name: work, mountPath: /work}]
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false, privileged: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+    container:
+      image: curlimages/curl@sha256:c1fe1679c34d9784c1b0d1e5f62ac0a79fca01fb6377cdd33e90473c6f9f9a69
+      command: ["sh", "-c"]
+      args:
+      - |
+        set -eu
+        KEY="$(cat /vault/secrets/qdrant-api-key)"
+        HOST="qdrant.qdrant.svc.cluster.local"
+        SUFFIX="{{workflow.parameters.restore-suffix}}"
+        mkdir -p /work/extracted
+        echo "extracting archive"
+        tar -xzvf /work/archive.tar.gz -C /work/extracted
+        COUNT=0
+        for f in $(find /work/extracted -name '*.snapshot'); do
+          COUNT=$((COUNT + 1))
+          SRC_COLL="$(basename "$(dirname "$f")")"
+          DEST_COLL="${SRC_COLL}${SUFFIX}"
+          echo "restoring $f -> collection $DEST_COLL"
+          curl -sf -X POST "http://$HOST:6333/collections/$DEST_COLL/snapshots/upload?wait=true" \
+            -H "api-key: $KEY" \
+            -F "snapshot=@$f"
+          echo
+        done
+        if [ "$COUNT" -eq 0 ]; then
+          echo "no .snapshot files found in the archive" >&2
+          exit 1
+        fi
+        echo "restored $COUNT collection(s)"
+      volumeMounts: [{name: work, mountPath: /work}]
+      securityContext: {runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, allowPrivilegeEscalation: false, privileged: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}
+      resources: {requests: {cpu: 25m, memory: 32Mi}, limits: {cpu: 200m, memory: 64Mi}}
+    retryStrategy:
+      limit: "1"
+      retryPolicy: OnError
+  volumes:
+  - {name: tmp, emptyDir: {sizeLimit: 32Mi}}
+  - {name: work, emptyDir: {sizeLimit: 512Mi}}
