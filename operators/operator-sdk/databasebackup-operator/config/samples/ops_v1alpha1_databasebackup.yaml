@@ -1,0 +1,10 @@
+apiVersion: ops.neglected.io/v1alpha1
+kind: DatabaseBackup
+metadata:
+  name: example-backup
+  namespace: default
+spec:
+  database: appdb
+  args:
+    - --full
+  ttlSecondsAfterFinished: 3600
