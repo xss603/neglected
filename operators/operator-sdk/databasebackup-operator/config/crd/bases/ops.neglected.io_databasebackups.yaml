@@ -1,0 +1,83 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databasebackups.ops.neglected.io
+spec:
+  group: ops.neglected.io
+  names:
+    kind: DatabaseBackup
+    listKind: DatabaseBackupList
+    plural: databasebackups
+    shortNames:
+      - dbb
+    singular: databasebackup
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              properties:
+                database:
+                  type: string
+                command:
+                  type: array
+                  items:
+                    type: string
+                args:
+                  type: array
+                  items:
+                    type: string
+                env:
+                  type: array
+                  items:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                backoffLimit:
+                  type: integer
+                  format: int32
+                ttlSecondsAfterFinished:
+                  type: integer
+                  format: int32
+                serviceAccountName:
+                  type: string
+            status:
+              type: object
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                jobName:
+                  type: string
+                active:
+                  type: integer
+                  format: int32
+                succeeded:
+                  type: integer
+                  format: int32
+                failed:
+                  type: integer
+                  format: int32
+                startTime:
+                  type: string
+                  format: date-time
+                completionTime:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  items:
+                    x-kubernetes-preserve-unknown-fields: true
+      subresources:
+        status: {}
