@@ -7,10 +7,11 @@ This repo is organized by the systems and workflows it documents.
 - `apps/` — application and service-specific assets
   - `agentgateway/`
   - `startlette/`
-- `cluster/` — cluster operations, debugging, and support scripts
+- `cluster/` — cluster operations, debugging, support scripts, and runbooks
   - `argo/`
   - `debug-k8s/`
   - `scripts/`
+  - `devsecops-kubeadmin-runbook.md`
 - `networking/` — ingress, gateway, and networking incident notes
   - `kgateway/`
   - `traefik-incident-analyse/`
