@@ -1,0 +1,48 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: inject-registry-ca-certificate
+  annotations:
+    policies.kyverno.io/title: Inject registry CA certificate
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Mounts the registry-ca Secret into Pods and Pod templates in
+      namespaces labeled registry-access.xss603.io/inject=true. The Secret
+      must already exist in each target namespace and expose the CA bundle
+      as ca.crt. Existing workloads must be restarted after enabling the
+      namespace label or updating this policy because background mutation is
+      disabled.
+    pod-policies.kyverno.io/autogen-controllers: Deployment,StatefulSet,DaemonSet,Job,CronJob
+spec:
+  admission: true
+  background: false
+  rules:
+    - name: add-registry-ca-volume-and-mount
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaceSelector:
+                matchLabels:
+                  registry-access.xss603.io/inject: "true"
+      mutate:
+        patchStrategicMerge:
+          spec:
+            volumes:
+              - name: registry-ca
+                secret:
+                  secretName: registry-ca
+            containers:
+              - (name): "*"
+                volumeMounts:
+                  - name: registry-ca
+                    mountPath: /etc/ssl/certs/registry-ca
+                    readOnly: true
+            =(initContainers):
+              - (name): "*"
+                volumeMounts:
+                  - name: registry-ca
+                    mountPath: /etc/ssl/certs/registry-ca
+                    readOnly: true
