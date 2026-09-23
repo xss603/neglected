@@ -20,6 +20,8 @@ This repo is organized by the systems and workflows it documents.
   - `grafana-dashboards/`
 - `operators/` — operator-related notes and docs
   - `operator-sdk/`
+- `manifests/` — cluster-scoped manifests and policy resources
+  - `kyverno-policies/`
 - `workflows/` — backup and workflow manifests
   - `wkf-qdrant-bkp/`
 
@@ -28,3 +30,7 @@ This repo is organized by the systems and workflows it documents.
 - Keep machine-specific runtime artifacts out of the tracked repo when possible.
 - Prefer placing new files alongside the subsystem they belong to rather than in the repo root.
 - `CLAUDE.md` remains at the root and contains operational guidance for this workspace.
+- `manifests/kyverno-policies/inject-registry-access-secret.yaml` adds the `registry-access`
+  imagePullSecret to Pods and Pod templates in namespaces labeled
+  `registry-access.xss603.io/inject=true`; the Secret itself must already exist in each target
+  namespace and must not be committed to this repository.
