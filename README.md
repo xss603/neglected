@@ -35,3 +35,8 @@ This repo is organized by the systems and workflows it documents.
   namespaces labeled `registry-access.xss603.io/inject=true`; the Secret itself must already exist in each target
   namespace and must not be committed to this repository. Because the policy only mutates new
   admissions, existing workloads in opted-in namespaces must be restarted to pick up the secret.
+- `manifests/kyverno-policies/inject-registry-ca-certificate.yaml` mounts the `registry-ca` Secret
+  into Pods and Pod templates in namespaces labeled `registry-access.xss603.io/inject=true` at
+  `/etc/ssl/certs/registry-ca`; the Secret must already exist in each target namespace and expose
+  the CA bundle as `ca.crt`. Because the policy only mutates new admissions, existing workloads in
+  opted-in namespaces must be restarted to pick up the mount.
