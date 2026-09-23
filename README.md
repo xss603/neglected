@@ -33,4 +33,5 @@ This repo is organized by the systems and workflows it documents.
 - `manifests/kyverno-policies/inject-registry-access-secret.yaml` adds the `registry-access`
   imagePullSecret to Pods and Pod templates in namespaces labeled
   `registry-access.xss603.io/inject=true`; the Secret itself must already exist in each target
-  namespace and must not be committed to this repository.
+  namespace and must not be committed to this repository. Because the policy only mutates new
+  admissions, existing workloads in opted-in namespaces must be restarted to pick up the secret.
