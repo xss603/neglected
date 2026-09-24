@@ -1,0 +1,91 @@
+# Not deployed by ArgoCD on purpose - same reasoning as
+# ../sbom/generate-sbom-job.yaml: this is a one-off connectivity probe, not
+# a persistent workload, so it is a template to `kubectl apply` by hand and
+# delete when done, not a standing Application.
+#
+# What it does: runs main.go (this directory) inside a golang:1.23-alpine
+# pod via `go run`, emitting a counter, a histogram, and a gauge over OTLP
+# to signoz-otel-collector.signoz.svc.cluster.local:4317. Exits 0 and
+# prints "OK: metrics exported successfully" only if the collector actually
+# ACKed the export - a Completed pod with that line in its logs is the
+# proof the OTLP path (DNS, NetworkPolicy, collector reachability) works
+# end to end, not just that the pod scheduled.
+#
+# IMPORTANT: signoz-otel-collector is scaled to 0 by hand whenever RAM is
+# tight (see the main README's SigNoz section) - check it's actually
+# running first:
+#   kubectl -n signoz get deploy signoz-otel-collector
+#   kubectl -n signoz scale deploy signoz-otel-collector --replicas=1   # if 0
+#
+# Usage (from this directory):
+#   kubectl create configmap otel-metrics-test-src \
+#     --from-file=main.go --from-file=go.mod --from-file=go.sum \
+#     -n default --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f job.yaml
+#   kubectl wait --for=condition=complete job/otel-metrics-test --timeout=180s
+#   kubectl logs job/otel-metrics-test
+#   kubectl delete job otel-metrics-test
+#   kubectl delete configmap otel-metrics-test-src
+#
+# Point it at a different collector/protocol by editing the args below
+# (or set OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_PROTOCOL env
+# vars instead - main.go reads both).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: otel-metrics-test
+  namespace: default
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      # No cluster egress needed beyond the module proxy (proxy.golang.org)
+      # and the in-cluster collector - GOFLAGS=-mod=mod lets `go run` fetch
+      # go.sum-pinned deps without a prior `go mod download` step.
+      containers:
+        - name: otel-metrics-test
+          image: golang:1.25-alpine
+          workingDir: /src
+          command:
+            - sh
+            - -c
+            - |
+              set -euo pipefail
+              go run . \
+                -endpoint signoz-otel-collector.signoz.svc.cluster.local:4317 \
+                -protocol grpc \
+                -insecure \
+                -count 5 \
+                -interval 2s
+          volumeMounts:
+            - name: src
+              mountPath: /src
+          env:
+            - name: GOCACHE
+              value: /tmp/gocache
+            - name: GOPATH
+              value: /tmp/gopath
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            readOnlyRootFilesystem: false # go run needs to write build cache under /tmp
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: src
+          configMap:
+            name: otel-metrics-test-src
