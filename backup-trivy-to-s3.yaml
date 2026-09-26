@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  annotations:
+    argocd.argoproj.io/tracking-id: argo-workflows-config:argoproj.io/WorkflowTemplate:argo-workflows/trivy-reports-backup
+  labels:
+    app.kubernetes.io/instance: argo-workflows-config
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: argo-workflows-config
+    helm.sh/chart: app-template-5.1.0
+  name: trivy-reports-backup
+  namespace: argo-workflows
+spec:
+  activeDeadlineSeconds: 600
+  entrypoint: backup
+  podGC:
+    deleteDelayDuration: 5m
+    strategy: OnPodCompletion
+  serviceAccountName: argo-workflow
+  templates:
+  - container:
+      args:
+      - |
+        set -eu
+        echo "exporting VulnerabilityReports..."
+        kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces -o json \
+          | gzip -9 > /tmp/vulnerabilityreports.json.gz
+        echo "report count: $(kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces --no-headers | wc -l)"
+        echo "archive size: $(wc -c < /tmp/vulnerabilityreports.json.gz) bytes"
+      command:
+      - /bin/sh
+      - -c
+      image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+      resources:
+        limits:
+          cpu: 300m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        privileged: false
+        readOnlyRootFilesystem: true
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - mountPath: /tmp
+        name: tmp
+    name: backup
+    outputs:
+      artifacts:
+      - archive:
+          none: {}
+        name: vulnerabilityreports
+        path: /tmp/vulnerabilityreports.json.gz
+        s3:
+          accessKeySecret:
+            key: TRIVY_BACKUP_ACCESS_KEY
+            name: minio-trivy-backup-credentials
+          bucket: trivy-reports
+          endpoint: minio.minio.svc.cluster.local:9000
+          insecure: true
+          key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
+          secretKeySecret:
+            key: TRIVY_BACKUP_SECRET_KEY
+            name: minio-trivy-backup-credentials
+    retryStrategy:
+      limit: "2"
+      retryPolicy: OnError
+  volumes:
+  - emptyDir:
+      sizeLimit: 128Mi
+    name: tmp
