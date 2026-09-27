@@ -1,0 +1,17 @@
+# Reference Helm values for common trivy-operator "no reports" causes:
+# - scanning scoped to fewer namespaces than expected
+# - concurrent scan jobs throttled too low for this node's workload count
+# - ghcr.io rate limits on the vulnerability DB pull
+#
+# Not applied directly to the cluster from here - this repo has no live
+# ArgoCD Application for trivy-operator today. If/when one is added under
+# apps/, these keys become that Application's helm values, edited in git
+# and reconciled by ArgoCD, never `helm upgrade`d by hand (see CLAUDE.md
+# "Nothing is kubectl apply'd by hand").
+targetNamespaces: ""                  # empty string = scan all namespaces
+operator:
+  vulnerabilityScannerEnabled: true
+  scanJobsConcurrentLimit: 5
+trivy:
+  dbRepository: mirror.gcr.io/aquasec/trivy-db        # avoids ghcr.io rate limits
+  javaDbRepository: mirror.gcr.io/aquasec/trivy-java-db
