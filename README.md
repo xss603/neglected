@@ -20,8 +20,8 @@ This repo is organized by the systems and workflows it documents.
   - `grafana-dashboards/`
 - `operators/` — operator-related notes and docs
   - `operator-sdk/`
-  - `trivy-operator/` — triage script and Helm values fix for "no
-    VulnerabilityReports found"
+  - `trivy-operator/` — triage script, Helm values fix, and upgrade
+    procedure for "no VulnerabilityReports found"
 - `manifests/` — cluster-scoped manifests and policy resources
   - `kyverno-policies/`
 - `workflows/` — backup and workflow manifests

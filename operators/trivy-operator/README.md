@@ -34,6 +34,51 @@ the namespace/scope fixes below.
 "unrecognized scan job condition" in its output, not just generic
 error/fail/limit hits.
 
+## Upgrade procedure
+
+trivy-operator has no ArgoCD `Application` in this repo, so it isn't
+GitOps-managed today — it was installed directly with `helm install` on the
+server, and `helm upgrade` there is the accepted manual path until it's
+brought under GitOps (see CLAUDE.md's "nothing is applied by hand" rule,
+which this is the deliberate exception to, same as Vault/SigNoz's live-state
+carve-outs).
+
+Run [`upgrade.sh`](./upgrade.sh) **on the server itself**, over the existing
+SSH session:
+
+```bash
+ssh root@<SERVER_IP> -p 22
+cd /path/to/this/repo/operators/trivy-operator
+./upgrade.sh                 # upgrades to the latest chart version
+./upgrade.sh 0.24.1          # or pin an explicit chart version
+```
+
+What it does, in order:
+1. Prints the currently installed release/chart version.
+2. `helm repo update` against the aqua-security chart repo.
+3. Resolves the target version (latest, or the one you pass).
+4. Shows a `helm diff` preview if the `helm-diff` plugin is installed, then
+   asks for confirmation before changing anything.
+5. `helm upgrade --reuse-values -f values-fix.yaml --wait`, applying this
+   repo's [values-fix.yaml](./values-fix.yaml) fixes (all-namespace scope,
+   `scanJobsConcurrentLimit`, mirrored trivy-db) on top of whatever's
+   already set.
+6. Waits for the operator Deployment rollout, then re-checks the logs for
+   the `SuccessCriteriaMet` error and reports the live `VulnerabilityReport`
+   count.
+
+If the error is still present after upgrading, the chart version you picked
+doesn't yet carry the fix — check `aqua-security/trivy-operator` release
+notes/issues for the version that added `SuccessCriteriaMet` handling and
+re-run with that version pinned. **Rollback:** `helm rollback trivy-operator
+-n trivy-system`.
+
+Once this is confirmed working, the next step is bringing trivy-operator
+under GitOps properly: capture the release's current values with `helm get
+values trivy-operator -n trivy-system`, commit them as an ArgoCD
+`Application` under `apps/`, then `helm uninstall` the manual release so
+ArgoCD owns it going forward — don't run both in parallel.
+
 ## Other likely causes
 
 `VulnerabilityReport` is a namespaced CRD. `kubectl get vulnerabilityreports`
