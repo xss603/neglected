@@ -22,6 +22,8 @@ This repo is organized by the systems and workflows it documents.
   - `operator-sdk/`
   - `trivy-operator/` — triage script and Helm values fix for "no
     VulnerabilityReports found"
+  - `registry-cli/` — JFrog CLI (`jf`) and IBM Cloud CR (`ibmcloud cr`)
+    reference for managing container images
 - `manifests/` — cluster-scoped manifests and policy resources
   - `kyverno-policies/`
 - `workflows/` — backup and workflow manifests
