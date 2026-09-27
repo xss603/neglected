@@ -69,7 +69,7 @@ jf rt search "docker-local/myapp/*" \
 ## IBM Cloud Container Registry (`ibmcloud cr`)
 
 This is what backs `fr2.icr.io` — the same OCI registry `operators/trivy-operator`'s
-wrapper `Chart.yaml` pulls from (`oci://fr2.icr.io/ap26882-prod/.../toolbox/helm`).
+wrapper `Chart.yaml` pulls from (`oci://fr2.icr.io/<account-namespace>/toolbox/helm`).
 
 ### Install
 
@@ -93,48 +93,48 @@ ibmcloud cr login                   # wires docker (and helm registry) auth loca
 
 ```bash
 ibmcloud cr namespace-list
-ibmcloud cr namespace-add ap12287
-ibmcloud cr namespace-rm ap12287    # destructive - confirm nothing references it first
+ibmcloud cr namespace-add <account-namespace>
+ibmcloud cr namespace-rm <account-namespace>    # destructive - confirm nothing references it first
 ```
 
 ### Image operations
 
 ```bash
 # list images in a namespace
-ibmcloud cr image-list --restrict ap26882-prod/market-place/ap12287
+ibmcloud cr image-list --restrict <account-namespace>
 
 # inspect one image (digest, size, layers, created)
-ibmcloud cr image-inspect fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:1.2.3
+ibmcloud cr image-inspect fr2.icr.io/<account-namespace>/toolbox/myimage:1.2.3
 
 # list all digests/tags for a repo
-ibmcloud cr image-digests --restrict ap26882-prod/market-place/ap12287/toolbox/myimage
+ibmcloud cr image-digests --restrict <account-namespace>/toolbox/myimage
 
 # tag (creates a new tag pointing at the same digest, no re-push)
 ibmcloud cr image-tag \
-  fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:1.2.3 \
-  fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:stable
+  fr2.icr.io/<account-namespace>/toolbox/myimage:1.2.3 \
+  fr2.icr.io/<account-namespace>/toolbox/myimage:stable
 
 # remove an image (single tag) or a whole digest
-ibmcloud cr image-rm fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:old-tag
+ibmcloud cr image-rm fr2.icr.io/<account-namespace>/toolbox/myimage:old-tag
 ```
 
 ### Vulnerability scanning
 
 ```bash
-ibmcloud cr va fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:1.2.3
+ibmcloud cr va fr2.icr.io/<account-namespace>/toolbox/myimage:1.2.3
 ```
 
 ### Retention policy (built-in TTL, no cron/jq needed)
 
 ```bash
-ibmcloud cr retention-policy-set ap12287 --images 5 --days 30
-ibmcloud cr retention-policy-get ap12287
+ibmcloud cr retention-policy-set <account-namespace> --images 5 --days 30
+ibmcloud cr retention-policy-get <account-namespace>
 ```
 
 ### Building directly in the registry (no local docker needed)
 
 ```bash
-ibmcloud cr build -t fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/myimage:1.2.3 .
+ibmcloud cr build -t fr2.icr.io/<account-namespace>/toolbox/myimage:1.2.3 .
 ```
 
 ---
@@ -148,7 +148,7 @@ separate auth step:
 
 ```bash
 ibmcloud cr login
-helm show chart oci://fr2.icr.io/ap26882-prod/market-place/ap12287/toolbox/helm/trivy-operator --version 0.36.0
+helm show chart oci://fr2.icr.io/<account-namespace>/toolbox/helm/trivy-operator --version 0.36.0
 ```
 
 ## Caveats
