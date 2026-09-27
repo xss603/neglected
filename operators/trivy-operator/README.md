@@ -1,6 +1,40 @@
 # trivy-operator: no VulnerabilityReports found
 
-## Most likely cause
+## Confirmed root cause on this cluster
+
+`trivy-operator-in-cluster` logs a `Reconciler error` for every scan Job and
+never produces a report:
+
+```json
+{
+  "level": "error",
+  "msg": "Reconciler error",
+  "controller": "job",
+  "namespace": "trivy-system",
+  "name": "scan-vulnerabilityreport-675df8f5b",
+  "error": "unrecognized scan job condition: SuccessCriteriaMet"
+}
+```
+
+`SuccessCriteriaMet` is a `batch/v1` Job status condition tied to the
+`JobSuccessPolicy` feature (beta, on by default from Kubernetes ~1.31). The
+installed trivy-operator's Job-watching code predates that condition type and
+throws instead of treating it as success, so the scan Job completes but the
+operator never converts it into a `VulnerabilityReport` — it just loops
+re-reconciling and erroring.
+
+**Fix:** upgrade `trivy-operator` to a release whose Job reconciler recognizes
+`SuccessCriteriaMet` (check the `aqua-security/trivy-operator` releases/issues
+for that string) — do not downgrade the cluster's Kubernetes version to work
+around it. Until upgraded, existing scan Jobs for already-reconciled
+workloads keep failing the same way, so no report will appear regardless of
+the namespace/scope fixes below.
+
+`triage.sh` step 2 (operator log grep) surfaces this line directly — look for
+"unrecognized scan job condition" in its output, not just generic
+error/fail/limit hits.
+
+## Other likely causes
 
 `VulnerabilityReport` is a namespaced CRD. `kubectl get vulnerabilityreports`
 without `-A` only checks the current context's namespace (usually `default`),

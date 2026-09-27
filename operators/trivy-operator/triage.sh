@@ -19,6 +19,15 @@ kubectl get vulnerabilityreports.aquasecurity.github.io -A 2>&1
 hdr "2. Operator logs (errors / rate limits)"
 kubectl logs -n "$NS" deploy/trivy-operator --tail=100 2>&1 | grep -iE "error|fail|limit|toomanyrequests" || echo "  no matching lines"
 
+hdr "2a. Known bug check: unrecognized Job condition (e.g. SuccessCriteriaMet)"
+if kubectl logs -n "$NS" deploy/trivy-operator --tail=500 2>&1 | grep -q "unrecognized scan job condition"; then
+  echo "  FOUND: operator version predates a Job status condition this cluster's"
+  echo "  Kubernetes emits (e.g. SuccessCriteriaMet from JobSuccessPolicy)."
+  echo "  Fix: upgrade trivy-operator - see README.md 'Confirmed root cause'."
+else
+  echo "  not seen in the last 500 log lines"
+fi
+
 hdr "3. Scan jobs and pods in $NS"
 kubectl get jobs,pods -n "$NS" 2>&1
 
