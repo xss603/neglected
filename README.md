@@ -21,7 +21,8 @@ This repo is organized by the systems and workflows it documents.
 - `operators/` — operator-related notes and docs
   - `operator-sdk/`
   - `trivy-operator/` — triage script and Helm values fix for "no
-    VulnerabilityReports found"
+    VulnerabilityReports found"; `scan-to-s3.yaml` is a GitLab CI fragment
+    that uploads trivy scan reports to MinIO S3
   - `registry-cli/` — JFrog CLI (`jf`) and IBM Cloud CR (`ibmcloud cr`)
     reference for managing container images
 - `manifests/` — cluster-scoped manifests and policy resources
