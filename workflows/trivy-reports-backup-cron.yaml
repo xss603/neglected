@@ -5,7 +5,7 @@ metadata:
   namespace: argo-workflows
 spec:
   schedules:
-    - "0 2 * * *"
+    - "0 2 1 * *"
   timezone: UTC
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 300
