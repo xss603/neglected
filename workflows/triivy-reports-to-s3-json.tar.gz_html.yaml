@@ -1,0 +1,253 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  labels:
+    app.kubernetes.io/instance: argo-workflows-config
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: argo-workflows-config
+    helm.sh/chart: app-template-5.1.0
+  name: trivy-reports-backup
+  namespace: argo-workflows
+spec:
+  activeDeadlineSeconds: 600
+  entrypoint: backup
+  podGC:
+    deleteDelayDuration: 5m
+    strategy: OnPodCompletion
+  serviceAccountName: argo-workflow
+  templates:
+  - container:
+      args:
+      - |
+        set -eu
+        echo "rendering HTML report..."
+        gunzip -c /tmp/vulnerabilityreports.json.gz > /tmp/vulnerabilityreports.json
+        cat > /tmp/render.py <<'PYEOF'
+        import json, html, sys
+        from collections import defaultdict
+
+        SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+        SEV_COLOR = {
+            "CRITICAL": "#b91c1c", "HIGH": "#c2410c", "MEDIUM": "#a16207",
+            "LOW": "#1d4ed8", "UNKNOWN": "#6b7280",
+        }
+
+        def esc(x):
+            return html.escape(str(x if x is not None else ""))
+
+        def counts_of(summary):
+            return {
+                "CRITICAL": summary.get("criticalCount", 0),
+                "HIGH": summary.get("highCount", 0),
+                "MEDIUM": summary.get("mediumCount", 0),
+                "LOW": summary.get("lowCount", 0),
+                "UNKNOWN": summary.get("unknownCount", 0),
+            }
+
+        def detail_table(vulns):
+            order = {s: i for i, s in enumerate(SEV_ORDER)}
+            rows = sorted(vulns, key=lambda v: order.get(v.get("severity", "UNKNOWN"), 99))
+            cells = []
+            for v in rows:
+                sev = v.get("severity", "UNKNOWN")
+                vid = esc(v.get("vulnerabilityID", ""))
+                link = v.get("primaryLink", "")
+                vid_cell = "<a href='%s' target='_blank'>%s</a>" % (esc(link), vid) if link else vid
+                cells.append(
+                    "<tr><td><span class='badge' style='background:%s'>%s</span></td>"
+                    "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                        SEV_COLOR.get(sev, "#6b7280"), esc(sev), vid_cell,
+                        esc(v.get("resource", "")), esc(v.get("installedVersion", "")),
+                        esc(v.get("fixedVersion", "-")), esc(v.get("title", "")),
+                    )
+                )
+            return (
+                "<table class='detail-table'><thead><tr>"
+                "<th>Severity</th><th>CVE</th><th>Resource</th><th>Installed</th>"
+                "<th>Fixed</th><th>Title</th></tr></thead><tbody>%s</tbody></table>"
+            ) % "".join(cells)
+
+        def main(in_path, out_path):
+            with open(in_path) as f:
+                data = json.load(f)
+            items = data.get("items", [])
+            rows = []
+            totals = defaultdict(int)
+            for item in items:
+                meta = item.get("metadata", {})
+                report = item.get("report", {})
+                artifact = report.get("artifact", {})
+                counts = counts_of(report.get("summary", {}))
+                for sev, n in counts.items():
+                    totals[sev] += n
+                rows.append({
+                    "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
+                    "repo": artifact.get("repository", ""),
+                    "tag": artifact.get("tag", artifact.get("digest", "")),
+                    "counts": counts, "vulns": report.get("vulnerabilities", []) or [],
+                })
+            rows.sort(key=lambda r: tuple(-r["counts"][s] for s in SEV_ORDER))
+
+            summary_rows = []
+            detail_sections = []
+            for r in rows:
+                image = "%s:%s" % (r["repo"], r["tag"]) if r["tag"] else r["repo"]
+                nums = "".join("<td class='num'>%d</td>" % r["counts"][s] for s in SEV_ORDER)
+                total = sum(r["counts"].values())
+                summary_rows.append(
+                    "<tr><td>%s</td><td>%s</td><td>%s</td>%s<td class='num'><b>%d</b></td></tr>" % (
+                        esc(r["ns"]), esc(r["name"]), esc(image), nums, total,
+                    )
+                )
+                if r["vulns"]:
+                    badges = " ".join(
+                        "<span class='badge' style='background:%s'>%d %s</span>" % (
+                            SEV_COLOR[s], r["counts"][s], s.title())
+                        for s in SEV_ORDER if r["counts"][s]
+                    )
+                    detail_sections.append(
+                        "<details><summary>%s/%s &mdash; %s &nbsp;%s</summary>%s</details>" % (
+                            esc(r["ns"]), esc(r["name"]), esc(image), badges, detail_table(r["vulns"]),
+                        )
+                    )
+
+            head_cells = "".join("<th class='num'>%s</th>" % s.title() for s in SEV_ORDER)
+            grand_total = sum(totals.values())
+            style = (
+                "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;"
+                "color:#e2e8f0;margin:0;padding:24px}"
+                "h1{font-size:20px;margin-bottom:4px}.meta{color:#94a3b8;font-size:13px;margin-bottom:20px}"
+                "table{border-collapse:collapse;width:100%;margin-bottom:28px;background:#1e293b}"
+                "th,td{padding:6px 10px;border-bottom:1px solid #334155;text-align:left;font-size:13px}"
+                "th{background:#0b1220;color:#94a3b8}tr:hover{background:#273449}"
+                ".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;"
+                "font-weight:600;color:#fff}.num{text-align:right;font-variant-numeric:tabular-nums}"
+                "details{margin-bottom:10px;background:#1e293b;border-radius:6px}"
+                "summary{cursor:pointer;padding:10px 14px;font-size:14px}"
+                "summary:hover{background:#273449}"
+                ".detail-table{margin:0 14px 14px 14px;width:calc(100% - 28px)}a{color:#60a5fa}"
+            )
+            page = (
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                "<title>Trivy VulnerabilityReports</title><style>%s</style></head><body>"
+                "<h1>Trivy VulnerabilityReports export</h1>"
+                "<div class='meta'>%d reports &middot; %d total findings</div>"
+                "<table><thead><tr><th>Namespace</th><th>Workload</th><th>Image</th>%s"
+                "<th class='num'>Total</th></tr></thead><tbody>%s</tbody></table>%s"
+                "</body></html>"
+            ) % (style, len(items), grand_total, head_cells, "".join(summary_rows), "".join(detail_sections))
+            with open(out_path, "w") as f:
+                f.write(page)
+
+        if __name__ == "__main__":
+            main(sys.argv[1], sys.argv[2])
+        PYEOF
+        python3 /tmp/render.py /tmp/vulnerabilityreports.json /tmp/vulnerabilityreports.html
+        echo "html size: $(wc -c < /tmp/vulnerabilityreports.html) bytes"
+      command:
+      - /bin/sh
+      - -c
+      env:
+      - name: PYTHONDONTWRITEBYTECODE
+        value: '1'
+      - name: HOME
+        value: /tmp
+      image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
+      resources:
+        limits:
+          cpu: 300m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 96Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        privileged: false
+        readOnlyRootFilesystem: true
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - mountPath: /tmp
+        name: tmp
+    initContainers:
+    - args:
+      - |
+        set -eu
+        echo "exporting VulnerabilityReports..."
+        kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces -o json \
+          | gzip -9 > /tmp/vulnerabilityreports.json.gz
+        echo "report count: $(kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces --no-headers | wc -l)"
+        echo "archive size: $(wc -c < /tmp/vulnerabilityreports.json.gz) bytes"
+      command:
+      - /bin/sh
+      - -c
+      image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+      name: export-json
+      resources:
+        limits:
+          cpu: 300m
+          memory: 256Mi
+        requests:
+          cpu: 50m
+          memory: 64Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+          - ALL
+        privileged: false
+        readOnlyRootFilesystem: true
+        runAsGroup: 1001
+        runAsNonRoot: true
+        runAsUser: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      volumeMounts:
+      - mountPath: /tmp
+        name: tmp
+    name: backup
+    outputs:
+      artifacts:
+      - archive:
+          none: {}
+        name: vulnerabilityreports
+        path: /tmp/vulnerabilityreports.json.gz
+        s3:
+          accessKeySecret:
+            key: TRIVY_BACKUP_ACCESS_KEY
+            name: minio-trivy-backup-credentials
+          bucket: trivy-reports
+          endpoint: minio.minio.svc.cluster.local:9000
+          insecure: true
+          key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
+          secretKeySecret:
+            key: TRIVY_BACKUP_SECRET_KEY
+            name: minio-trivy-backup-credentials
+      - archive:
+          none: {}
+        name: vulnerabilityreports-html
+        path: /tmp/vulnerabilityreports.html
+        s3:
+          accessKeySecret:
+            key: TRIVY_BACKUP_ACCESS_KEY
+            name: minio-trivy-backup-credentials
+          bucket: trivy-reports
+          endpoint: minio.minio.svc.cluster.local:9000
+          insecure: true
+          key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.html
+          secretKeySecret:
+            key: TRIVY_BACKUP_SECRET_KEY
+            name: minio-trivy-backup-credentials
+    retryStrategy:
+      limit: '2'
+      retryPolicy: OnError
+  volumes:
+  - emptyDir:
+      sizeLimit: 128Mi
+    name: tmp
