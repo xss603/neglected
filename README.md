@@ -29,6 +29,9 @@ This repo is organized by the systems and workflows it documents.
   - `kyverno-policies/`
 - `workflows/` — backup and workflow manifests
   - `wkf-qdrant-bkp/`
+  - `trivy-reports-backup-cron.yaml` — nightly CronWorkflow (02:00 UTC)
+    triggering the `trivy-reports-backup` WorkflowTemplate
+    (`backup-trivy-to-s3.yaml`)
 
 ## Notes
 

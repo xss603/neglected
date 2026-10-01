@@ -1,0 +1,16 @@
+apiVersion: argoproj.io/v1alpha1
+kind: CronWorkflow
+metadata:
+  name: trivy-reports-backup-cron
+  namespace: argo-workflows
+spec:
+  schedules:
+    - "0 2 * * *"
+  timezone: UTC
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 4
+  workflowSpec:
+    workflowTemplateRef:
+      name: trivy-reports-backup
