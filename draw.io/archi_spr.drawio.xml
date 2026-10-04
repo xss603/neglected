@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="Page-1" id="qVlCT2eM7en4I05RvEu1">
+    <mxGraphModel dx="1096" dy="1052" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="clusterPlatform" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=8 4;fillColor=#eef2ff;strokeColor=#4338ca;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#3730a3;" value="Cluster: kube-platform" vertex="1">
+          <mxGeometry height="580" width="1800" x="20" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="nsPlatform" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#f5f3ff;strokeColor=#7c3aed;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#5b21b6;" value="ns: platform-system" vertex="1">
+          <mxGeometry height="440" width="1150" x="50" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="nsServing" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#fdf4ff;strokeColor=#a21caf;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#86198f;" value="ns: serving-platform" vertex="1">
+          <mxGeometry height="440" width="560" x="1230" y="295" as="geometry" />
+        </mxCell>
+        <mxCell id="clusterDevops" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=8 4;fillColor=#fff1f2;strokeColor=#be123c;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#9f1239;" value="Cluster: kube-devops-tools" vertex="1">
+          <mxGeometry height="400" width="880" x="20" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="nsGitlabRunners" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#fffbeb;strokeColor=#b45309;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#92400e;" value="ns: gitlab-runners" vertex="1">
+          <mxGeometry height="150" width="800" x="50" y="950" as="geometry" />
+        </mxCell>
+        <mxCell id="nsThanos" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#f0fdfa;strokeColor=#0f766e;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#115e59;" value="ns: thanos" vertex="1">
+          <mxGeometry height="110" width="800" x="50" y="1120" as="geometry" />
+        </mxCell>
+        <mxCell id="clusterWorkspaces" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=8 4;fillColor=#ecfeff;strokeColor=#0e7490;strokeWidth=2;fontSize=13;fontStyle=1;fontColor=#155e75;" value="Cluster: kube-workspaces" vertex="1">
+          <mxGeometry height="400" width="880" x="940" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="nsCoreStudio" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#f0f9ff;strokeColor=#0369a1;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#075985;" value="ns: core-studio" vertex="1">
+          <mxGeometry height="150" width="800" x="970" y="950" as="geometry" />
+        </mxCell>
+        <mxCell id="nsCoredStudioProd" parent="1" style="rounded=0;whiteSpace=wrap;html=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=8;dashed=1;dashPattern=4 3;fillColor=#fdf2f8;strokeColor=#be185d;strokeWidth=2;fontSize=12;fontStyle=1;fontColor=#9d174d;" value="ns: cored-studio-prod" vertex="1">
+          <mxGeometry height="110" width="800" x="970" y="1120" as="geometry" />
+        </mxCell>
+        <mxCell id="clients" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/account-group.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#475569;strokeColor=#1e293b;strokeWidth=2;" value="Clients / Users" vertex="1">
+          <mxGeometry height="50" width="170" x="520" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="vipApi" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/swap-horizontal-bold.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#f59e0b;strokeColor=#b45309;strokeWidth=2;" value="VIP LB&#xa;(ApiServer)" vertex="1">
+          <mxGeometry height="55" width="230" x="200" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="vipNats" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/swap-horizontal-bold.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#f59e0b;strokeColor=#b45309;strokeWidth=2;" value="VIP LB&#xa;(NATS broker)" vertex="1">
+          <mxGeometry height="55" width="230" x="780" y="110" as="geometry" />
+        </mxCell>
+        <mxCell id="vipTraefikPlatform" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/swap-horizontal-bold.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#f59e0b;strokeColor=#b45309;strokeWidth=2;" value="VIP Traefik&#xa;(ingress)" vertex="1">
+          <mxGeometry height="50" width="230" x="805" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="apiserver" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=40;fontColor=#ffffff;fontStyle=1;fontSize=14;image=https://api.iconify.design/mdi/server.svg?color=%23ffffff;imageWidth=26;imageHeight=26;fillColor=#2563eb;strokeColor=#1e3a8a;strokeWidth=3;" value="ApiServer" vertex="1">
+          <mxGeometry height="65" width="210" x="210" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="nats" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=40;fontColor=#ffffff;fontStyle=1;fontSize=14;image=https://api.iconify.design/mdi/server-network.svg?color=%23ffffff;imageWidth=26;imageHeight=26;fillColor=#2563eb;strokeColor=#1e3a8a;strokeWidth=3;" value="NATS&#xa;(message broker)" vertex="1">
+          <mxGeometry height="65" width="210" x="790" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="getkeeper" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/shield-lock.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#16a34a;strokeColor=#166534;strokeWidth=2;" value="GetKeeper&#xa;(secrets/auth)" vertex="1">
+          <mxGeometry height="55" width="170" x="80" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="syncer" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/sync.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#16a34a;strokeColor=#166534;strokeWidth=2;" value="Syncer" vertex="1">
+          <mxGeometry height="55" width="170" x="270" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="llmsdl" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/download.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#16a34a;strokeColor=#166534;strokeWidth=2;" value="LLMsDownloader" vertex="1">
+          <mxGeometry height="55" width="190" x="460" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="platformagent" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/robot.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#7c3aed;strokeColor=#4c1d95;strokeWidth=3;" value="Platform Agent" vertex="1">
+          <mxGeometry height="55" width="210" x="700" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="sailor" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=32;fontColor=#ffffff;fontStyle=1;fontSize=11;image=https://api.iconify.design/mdi/cog-sync.svg?color=%23ffffff;imageWidth=20;imageHeight=20;fillColor=#0d9488;strokeColor=#115e59;strokeWidth=2;" value="Operator: Sailor" vertex="1">
+          <mxGeometry height="55" width="140" x="700" y="505" as="geometry" />
+        </mxCell>
+        <mxCell id="dupot" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=32;fontColor=#ffffff;fontStyle=1;fontSize=11;image=https://api.iconify.design/mdi/cog-sync.svg?color=%23ffffff;imageWidth=20;imageHeight=20;fillColor=#0d9488;strokeColor=#115e59;strokeWidth=2;" value="Operator: Dupot" vertex="1">
+          <mxGeometry height="55" width="140" x="860" y="505" as="geometry" />
+        </mxCell>
+        <mxCell id="archobald" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=32;fontColor=#ffffff;fontStyle=1;fontSize=11;image=https://api.iconify.design/mdi/cog-sync.svg?color=%23ffffff;imageWidth=20;imageHeight=20;fillColor=#0d9488;strokeColor=#115e59;strokeWidth=2;" value="Operator: Archobald" vertex="1">
+          <mxGeometry height="55" width="140" x="1020" y="505" as="geometry" />
+        </mxCell>
+        <mxCell id="argoworkflows" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/source-branch.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#c026d3;strokeColor=#86198f;strokeWidth=2;" value="ArgoWorkflows" vertex="1">
+          <mxGeometry height="60" width="240" x="1260" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="modelsregistry" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/cube-outline.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#c026d3;strokeColor=#86198f;strokeWidth=2;" value="Models-Registry&#xa;(MLflow)" vertex="1">
+          <mxGeometry height="60" width="240" x="1260" y="415" as="geometry" />
+        </mxCell>
+        <mxCell id="vipTraefikDevops" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/swap-horizontal-bold.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#f59e0b;strokeColor=#b45309;strokeWidth=2;" value="VIP Traefik&#xa;(ingress)" vertex="1">
+          <mxGeometry height="50" width="230" x="350" y="885" as="geometry" />
+        </mxCell>
+        <mxCell id="runners" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/rocket-launch.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#e11d48;strokeColor=#9f1239;strokeWidth=2;" value="CI/CD Runners" vertex="1">
+          <mxGeometry height="60" width="210" x="90" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="trivy" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/shield-search.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#e11d48;strokeColor=#9f1239;strokeWidth=2;" value="Trivy (scanner)" vertex="1">
+          <mxGeometry height="60" width="210" x="340" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="thanos" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/chart-line.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#e11d48;strokeColor=#9f1239;strokeWidth=2;" value="Thanos&#xa;(metrics storage)" vertex="1">
+          <mxGeometry height="60" width="260" x="90" y="1150" as="geometry" />
+        </mxCell>
+        <mxCell id="vipTraefikWorkspaces" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=38;fontColor=#ffffff;fontStyle=1;fontSize=13;image=https://api.iconify.design/mdi/swap-horizontal-bold.svg?color=%23ffffff;imageWidth=24;imageHeight=24;fillColor=#f59e0b;strokeColor=#b45309;strokeWidth=2;" value="VIP Traefik&#xa;(ingress)" vertex="1">
+          <mxGeometry height="50" width="230" x="1270" y="885" as="geometry" />
+        </mxCell>
+        <mxCell id="codespaces" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/code-braces.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#0891b2;strokeColor=#155e75;strokeWidth=2;" value="Codespaces" vertex="1">
+          <mxGeometry height="60" width="210" x="1010" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="legacy" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/archive.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#0891b2;strokeColor=#155e75;strokeWidth=2;" value="Legacy" vertex="1">
+          <mxGeometry height="60" width="210" x="1260" y="990" as="geometry" />
+        </mxCell>
+        <mxCell id="gatekeeperprod" parent="1" style="rounded=1;whiteSpace=wrap;html=1;shape=label;imageAlign=left;imageVerticalAlign=middle;verticalAlign=middle;align=left;spacingLeft=36;fontColor=#ffffff;fontStyle=1;fontSize=12;image=https://api.iconify.design/mdi/shield-check.svg?color=%23ffffff;imageWidth=22;imageHeight=22;fillColor=#0e7490;strokeColor=#164e63;strokeWidth=3;" value="Gatekeeper" vertex="1">
+          <mxGeometry height="60" width="260" x="1010" y="1150" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="clients" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#475569;fontColor=#334155;labelBackgroundColor=#ffffff;" target="vipApi" value="HTTPS :443">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="vipApi" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="apiserver" value="L4/L7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="apiserver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#2563eb;fontColor=#1e3a8a;labelBackgroundColor=#ffffff;" target="getkeeper" value="secrets/auth">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="apiserver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#2563eb;fontColor=#1e3a8a;labelBackgroundColor=#ffffff;" target="syncer" value="sync trigger">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="apiserver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#2563eb;fontColor=#1e3a8a;labelBackgroundColor=#ffffff;" target="llmsdl" value="model fetch req">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="apiserver" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;startArrow=block;startFill=1;endArrow=block;endFill=1;strokeColor=#2563eb;fontColor=#1e3a8a;labelBackgroundColor=#ffffff;" target="vipNats" value="pub/sub">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="vipNats" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="nats" value="NATS proto :4222">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;startArrow=block;startFill=1;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;" target="vipNats" value="heartbeat / events">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;" target="sailor" value="reconcile">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;" target="dupot" value="reconcile">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;" target="archobald" value="reconcile">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" edge="1" parent="1" source="syncer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;dashed=1;dashPattern=6 4;endArrow=block;endFill=1;strokeColor=#16a34a;fontColor=#166534;labelBackgroundColor=#ffffff;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.2;entryY=1;entryDx=0;entryDy=0;" target="nats" value="publish state">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="355" y="415" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" edge="1" parent="1" source="llmsdl" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;dashed=1;dashPattern=6 4;endArrow=block;endFill=1;strokeColor=#16a34a;fontColor=#166534;labelBackgroundColor=#ffffff;exitX=0.5;exitY=0;exitDx=0;exitDy=0;entryX=0.35;entryY=1;entryDx=0;entryDy=0;" target="nats" value="artifact ready">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="555" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;exitX=0.3;exitY=1;exitDx=0;exitDy=0;" target="clusterDevops" value="orchestrate (kube API)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" edge="1" parent="1" source="platformagent" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;endArrow=block;endFill=1;strokeColor=#7c3aed;fontColor=#4c1d95;labelBackgroundColor=#ffffff;exitX=0.7;exitY=1;exitDx=0;exitDy=0;" target="clusterWorkspaces" value="orchestrate (kube API)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" edge="1" parent="1" source="syncer" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;dashed=1;dashPattern=6 4;endArrow=block;endFill=1;strokeColor=#16a34a;fontColor=#166534;labelBackgroundColor=#ffffff;" target="clusterDevops" value="sync config">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" edge="1" parent="1" source="llmsdl" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=3;dashed=1;dashPattern=6 4;endArrow=block;endFill=1;strokeColor=#16a34a;fontColor=#166534;labelBackgroundColor=#ffffff;" target="clusterWorkspaces" value="deliver models">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" edge="1" parent="1" source="runners" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#e11d48;fontColor=#9f1239;labelBackgroundColor=#ffffff;" target="trivy" value="scan artifacts">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" edge="1" parent="1" source="vipTraefikPlatform" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="argoworkflows" value="ingress">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" edge="1" parent="1" source="vipTraefikPlatform" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="modelsregistry" value="ingress">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" edge="1" parent="1" source="vipTraefikDevops" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="thanos" value="ingress (metrics UI)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e22" edge="1" parent="1" source="vipTraefikWorkspaces" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;fontSize=11;fontStyle=1;strokeWidth=2;endArrow=block;endFill=1;strokeColor=#f59e0b;fontColor=#92400e;labelBackgroundColor=#ffffff;" target="codespaces" value="ingress">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
