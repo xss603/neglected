@@ -1,253 +1,662 @@
-apiVersion: argoproj.io/v1alpha1
-kind: WorkflowTemplate
 metadata:
+  name: trivy-reports-backup
+  namespace: argo-workflows
+  uid: 5b921463-900c-450d-9be8-06aa47e167f2
+  resourceVersion: "22245837"
+  generation: 6
+  creationTimestamp: "2026-09-24T13:45:43Z"
   labels:
     app.kubernetes.io/instance: argo-workflows-config
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: argo-workflows-config
     helm.sh/chart: app-template-5.1.0
-  name: trivy-reports-backup
-  namespace: argo-workflows
 spec:
-  activeDeadlineSeconds: 600
-  entrypoint: backup
-  podGC:
-    deleteDelayDuration: 5m
-    strategy: OnPodCompletion
-  serviceAccountName: argo-workflow
   templates:
-  - container:
-      args:
-      - |
-        set -eu
-        echo "rendering HTML report..."
-        gunzip -c /tmp/vulnerabilityreports.json.gz > /tmp/vulnerabilityreports.json
-        cat > /tmp/render.py <<'PYEOF'
-        import json, html, sys
-        from collections import defaultdict
+    - name: backup-all
+      inputs: {}
+      outputs: {}
+      metadata: {}
+      dag:
+        tasks:
+          - name: vulnerabilityreports
+            template: backup
+            arguments: {}
+          - name: sbomreports
+            template: sbom-report
+            arguments: {}
+        failFast: false
+    - name: backup
+      inputs: {}
+      outputs:
+        artifacts:
+          - name: vulnerabilityreports
+            path: /tmp/vulnerabilityreports.json.gz
+            s3:
+              endpoint: minio.minio.svc.cluster.local:9000
+              bucket: trivy-reports
+              insecure: true
+              accessKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_ACCESS_KEY
+              secretKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_SECRET_KEY
+              key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
+            archive:
+              none: {}
+          - name: vulnerabilityreports-html
+            path: /tmp/vulnerabilityreports.html
+            s3:
+              endpoint: minio.minio.svc.cluster.local:9000
+              bucket: trivy-reports
+              insecure: true
+              accessKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_ACCESS_KEY
+              secretKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_SECRET_KEY
+              key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.html
+            archive:
+              none: {}
+      metadata: {}
+      container:
+        name: ""
+        image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
+        command:
+          - /bin/sh
+          - -c
+        args:
+          - >
+            set -eu
 
-        SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
-        SEV_COLOR = {
-            "CRITICAL": "#b91c1c", "HIGH": "#c2410c", "MEDIUM": "#a16207",
-            "LOW": "#1d4ed8", "UNKNOWN": "#6b7280",
-        }
+            echo "rendering HTML report..."
 
-        def esc(x):
-            return html.escape(str(x if x is not None else ""))
+            gunzip -c /tmp/vulnerabilityreports.json.gz >
+            /tmp/vulnerabilityreports.json
 
-        def counts_of(summary):
-            return {
-                "CRITICAL": summary.get("criticalCount", 0),
-                "HIGH": summary.get("highCount", 0),
-                "MEDIUM": summary.get("mediumCount", 0),
-                "LOW": summary.get("lowCount", 0),
-                "UNKNOWN": summary.get("unknownCount", 0),
+            cat > /tmp/render.py <<'PYEOF'
+
+            import json, html, sys
+
+            from collections import defaultdict
+
+
+            SEV_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+
+            SEV_COLOR = {
+                "CRITICAL": "#b91c1c", "HIGH": "#c2410c", "MEDIUM": "#a16207",
+                "LOW": "#1d4ed8", "UNKNOWN": "#6b7280",
             }
 
-        def detail_table(vulns):
-            order = {s: i for i, s in enumerate(SEV_ORDER)}
-            rows = sorted(vulns, key=lambda v: order.get(v.get("severity", "UNKNOWN"), 99))
-            cells = []
-            for v in rows:
-                sev = v.get("severity", "UNKNOWN")
-                vid = esc(v.get("vulnerabilityID", ""))
-                link = v.get("primaryLink", "")
-                vid_cell = "<a href='%s' target='_blank'>%s</a>" % (esc(link), vid) if link else vid
-                cells.append(
-                    "<tr><td><span class='badge' style='background:%s'>%s</span></td>"
-                    "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-                        SEV_COLOR.get(sev, "#6b7280"), esc(sev), vid_cell,
-                        esc(v.get("resource", "")), esc(v.get("installedVersion", "")),
-                        esc(v.get("fixedVersion", "-")), esc(v.get("title", "")),
-                    )
-                )
-            return (
-                "<table class='detail-table'><thead><tr>"
-                "<th>Severity</th><th>CVE</th><th>Resource</th><th>Installed</th>"
-                "<th>Fixed</th><th>Title</th></tr></thead><tbody>%s</tbody></table>"
-            ) % "".join(cells)
 
-        def main(in_path, out_path):
-            with open(in_path) as f:
-                data = json.load(f)
-            items = data.get("items", [])
-            rows = []
-            totals = defaultdict(int)
-            for item in items:
-                meta = item.get("metadata", {})
-                report = item.get("report", {})
-                artifact = report.get("artifact", {})
-                counts = counts_of(report.get("summary", {}))
-                for sev, n in counts.items():
-                    totals[sev] += n
-                rows.append({
-                    "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
-                    "repo": artifact.get("repository", ""),
-                    "tag": artifact.get("tag", artifact.get("digest", "")),
-                    "counts": counts, "vulns": report.get("vulnerabilities", []) or [],
-                })
-            rows.sort(key=lambda r: tuple(-r["counts"][s] for s in SEV_ORDER))
+            def esc(x):
+                return html.escape(str(x if x is not None else ""))
 
-            summary_rows = []
-            detail_sections = []
-            for r in rows:
-                image = "%s:%s" % (r["repo"], r["tag"]) if r["tag"] else r["repo"]
-                nums = "".join("<td class='num'>%d</td>" % r["counts"][s] for s in SEV_ORDER)
-                total = sum(r["counts"].values())
-                summary_rows.append(
-                    "<tr><td>%s</td><td>%s</td><td>%s</td>%s<td class='num'><b>%d</b></td></tr>" % (
-                        esc(r["ns"]), esc(r["name"]), esc(image), nums, total,
-                    )
-                )
-                if r["vulns"]:
-                    badges = " ".join(
-                        "<span class='badge' style='background:%s'>%d %s</span>" % (
-                            SEV_COLOR[s], r["counts"][s], s.title())
-                        for s in SEV_ORDER if r["counts"][s]
-                    )
-                    detail_sections.append(
-                        "<details><summary>%s/%s &mdash; %s &nbsp;%s</summary>%s</details>" % (
-                            esc(r["ns"]), esc(r["name"]), esc(image), badges, detail_table(r["vulns"]),
+            def counts_of(summary):
+                return {
+                    "CRITICAL": summary.get("criticalCount", 0),
+                    "HIGH": summary.get("highCount", 0),
+                    "MEDIUM": summary.get("mediumCount", 0),
+                    "LOW": summary.get("lowCount", 0),
+                    "UNKNOWN": summary.get("unknownCount", 0),
+                }
+
+            def detail_table(vulns):
+                order = {s: i for i, s in enumerate(SEV_ORDER)}
+                rows = sorted(vulns, key=lambda v: order.get(v.get("severity", "UNKNOWN"), 99))
+                cells = []
+                for v in rows:
+                    sev = v.get("severity", "UNKNOWN")
+                    vid = esc(v.get("vulnerabilityID", ""))
+                    link = v.get("primaryLink", "")
+                    vid_cell = "<a href='%s' target='_blank'>%s</a>" % (esc(link), vid) if link else vid
+                    cells.append(
+                        "<tr><td><span class='badge' style='background:%s'>%s</span></td>"
+                        "<td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                            SEV_COLOR.get(sev, "#6b7280"), esc(sev), vid_cell,
+                            esc(v.get("resource", "")), esc(v.get("installedVersion", "")),
+                            esc(v.get("fixedVersion", "-")), esc(v.get("title", "")),
                         )
                     )
+                return (
+                    "<table class='detail-table'><thead><tr>"
+                    "<th>Severity</th><th>CVE</th><th>Resource</th><th>Installed</th>"
+                    "<th>Fixed</th><th>Title</th></tr></thead><tbody>%s</tbody></table>"
+                ) % "".join(cells)
 
-            head_cells = "".join("<th class='num'>%s</th>" % s.title() for s in SEV_ORDER)
-            grand_total = sum(totals.values())
-            style = (
-                "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;"
-                "color:#e2e8f0;margin:0;padding:24px}"
-                "h1{font-size:20px;margin-bottom:4px}.meta{color:#94a3b8;font-size:13px;margin-bottom:20px}"
-                "table{border-collapse:collapse;width:100%;margin-bottom:28px;background:#1e293b}"
-                "th,td{padding:6px 10px;border-bottom:1px solid #334155;text-align:left;font-size:13px}"
-                "th{background:#0b1220;color:#94a3b8}tr:hover{background:#273449}"
-                ".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;"
-                "font-weight:600;color:#fff}.num{text-align:right;font-variant-numeric:tabular-nums}"
-                "details{margin-bottom:10px;background:#1e293b;border-radius:6px}"
-                "summary{cursor:pointer;padding:10px 14px;font-size:14px}"
-                "summary:hover{background:#273449}"
-                ".detail-table{margin:0 14px 14px 14px;width:calc(100% - 28px)}a{color:#60a5fa}"
+            def main(in_path, out_path):
+                with open(in_path) as f:
+                    data = json.load(f)
+                items = data.get("items", [])
+                rows = []
+                totals = defaultdict(int)
+                for item in items:
+                    meta = item.get("metadata", {})
+                    report = item.get("report", {})
+                    artifact = report.get("artifact", {})
+                    counts = counts_of(report.get("summary", {}))
+                    for sev, n in counts.items():
+                        totals[sev] += n
+                    rows.append({
+                        "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
+                        "repo": artifact.get("repository", ""),
+                        "tag": artifact.get("tag", artifact.get("digest", "")),
+                        "counts": counts, "vulns": report.get("vulnerabilities", []) or [],
+                    })
+                rows.sort(key=lambda r: tuple(-r["counts"][s] for s in SEV_ORDER))
+
+                summary_rows = []
+                detail_sections = []
+                for r in rows:
+                    image = "%s:%s" % (r["repo"], r["tag"]) if r["tag"] else r["repo"]
+                    nums = "".join("<td class='num'>%d</td>" % r["counts"][s] for s in SEV_ORDER)
+                    total = sum(r["counts"].values())
+                    summary_rows.append(
+                        "<tr><td>%s</td><td>%s</td><td>%s</td>%s<td class='num'><b>%d</b></td></tr>" % (
+                            esc(r["ns"]), esc(r["name"]), esc(image), nums, total,
+                        )
+                    )
+                    if r["vulns"]:
+                        badges = " ".join(
+                            "<span class='badge' style='background:%s'>%d %s</span>" % (
+                                SEV_COLOR[s], r["counts"][s], s.title())
+                            for s in SEV_ORDER if r["counts"][s]
+                        )
+                        detail_sections.append(
+                            "<details><summary>%s/%s &mdash; %s &nbsp;%s</summary>%s</details>" % (
+                                esc(r["ns"]), esc(r["name"]), esc(image), badges, detail_table(r["vulns"]),
+                            )
+                        )
+
+                head_cells = "".join("<th class='num'>%s</th>" % s.title() for s in SEV_ORDER)
+                grand_total = sum(totals.values())
+                style = (
+                    "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;"
+                    "color:#e2e8f0;margin:0;padding:24px}"
+                    "h1{font-size:20px;margin-bottom:4px}.meta{color:#94a3b8;font-size:13px;margin-bottom:20px}"
+                    "table{border-collapse:collapse;width:100%;margin-bottom:28px;background:#1e293b}"
+                    "th,td{padding:6px 10px;border-bottom:1px solid #334155;text-align:left;font-size:13px}"
+                    "th{background:#0b1220;color:#94a3b8}tr:hover{background:#273449}"
+                    ".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;"
+                    "font-weight:600;color:#fff}.num{text-align:right;font-variant-numeric:tabular-nums}"
+                    "details{margin-bottom:10px;background:#1e293b;border-radius:6px}"
+                    "summary{cursor:pointer;padding:10px 14px;font-size:14px}"
+                    "summary:hover{background:#273449}"
+                    ".detail-table{margin:0 14px 14px 14px;width:calc(100% - 28px)}a{color:#60a5fa}"
+                )
+                page = (
+                    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                    "<title>Trivy VulnerabilityReports</title><style>%s</style></head><body>"
+                    "<h1>Trivy VulnerabilityReports export</h1>"
+                    "<div class='meta'>%d reports &middot; %d total findings</div>"
+                    "<table><thead><tr><th>Namespace</th><th>Workload</th><th>Image</th>%s"
+                    "<th class='num'>Total</th></tr></thead><tbody>%s</tbody></table>%s"
+                    "</body></html>"
+                ) % (style, len(items), grand_total, head_cells, "".join(summary_rows), "".join(detail_sections))
+                with open(out_path, "w") as f:
+                    f.write(page)
+
+            if __name__ == "__main__":
+                main(sys.argv[1], sys.argv[2])
+            PYEOF
+
+            python3 /tmp/render.py /tmp/vulnerabilityreports.json
+            /tmp/vulnerabilityreports.html
+
+            echo "html size: $(wc -c < /tmp/vulnerabilityreports.html) bytes"
+        env:
+          - name: PYTHONDONTWRITEBYTECODE
+            value: "1"
+          - name: HOME
+            value: /tmp
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 96Mi
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        securityContext:
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsUser: 1001
+          runAsGroup: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
+      initContainers:
+        - name: export-json
+          image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - >
+              set -eu
+
+              echo "exporting VulnerabilityReports..."
+
+              kubectl get vulnerabilityreports.aquasecurity.github.io
+              --all-namespaces -o json \
+                | gzip -9 > /tmp/vulnerabilityreports.json.gz
+              echo "report count: $(kubectl get
+              vulnerabilityreports.aquasecurity.github.io --all-namespaces
+              --no-headers | wc -l)"
+
+              echo "archive size: $(wc -c < /tmp/vulnerabilityreports.json.gz)
+              bytes"
+          resources:
+            limits:
+              cpu: 300m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            runAsUser: 1001
+            runAsGroup: 1001
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+      retryStrategy:
+        limit: "2"
+        retryPolicy: OnError
+    - name: sbom-report
+      inputs: {}
+      outputs:
+        artifacts:
+          - name: sbomreports
+            path: /tmp/sbomreports.json.gz
+            s3:
+              endpoint: minio.minio.svc.cluster.local:9000
+              bucket: trivy-reports
+              insecure: true
+              accessKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_ACCESS_KEY
+              secretKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_SECRET_KEY
+              key: sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
+            archive:
+              none: {}
+          - name: sbomreports-licenses-html
+            path: /tmp/sbomreports-licenses.html
+            s3:
+              endpoint: minio.minio.svc.cluster.local:9000
+              bucket: trivy-reports
+              insecure: true
+              accessKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_ACCESS_KEY
+              secretKeySecret:
+                name: minio-trivy-backup-credentials
+                key: TRIVY_BACKUP_SECRET_KEY
+              key: sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}-licenses.html
+            archive:
+              none: {}
+      metadata: {}
+      container:
+        name: ""
+        image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
+        command:
+          - /bin/sh
+          - -c
+        args:
+          - |
+            set -eu
+            cat > /tmp/sbom_licenses.py <<'PYEOF'
+            import gzip, html, json, os, re, ssl, sys, urllib.parse, urllib.request
+            from collections import Counter, defaultdict
+
+            OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
+            OUT_GZ = os.path.join(OUT_DIR, "sbomreports.json.gz")
+            OUT_HTML = os.path.join(OUT_DIR, "sbomreports-licenses.html")
+            SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+            PAGE = 10
+
+            FAMS = [
+                ("permissive", "Permissive", "#15803d"),
+                ("weak", "Weak copyleft (LGPL, MPL, EPL...)", "#ca8a04"),
+                ("strong", "Strong copyleft (GPL)", "#c2410c"),
+                ("network", "Network copyleft (AGPL)", "#b91c1c"),
+                ("other", "Other / unclassified", "#7c3aed"),
+                ("unknown", "Unknown (NOASSERTION)", "#6b7280"),
+                ("none", "No license data", "#475569"),
+            ]
+            FAM_NAME = dict((k, n) for k, n, _ in FAMS)
+            FAM_COLOR = dict((k, c) for k, _, c in FAMS)
+            RANK = {"permissive": 0, "other": 1, "weak": 2, "strong": 3, "network": 4}
+            PERMISSIVE = ("MIT", "APACHE", "BSD", "ISC", "ZLIB", "0BSD", "X11", "X-11", "UNLICENSE",
+                          "PUBLIC-DOMAIN", "PUBLIC DOMAIN", "PSF", "PYTHON", "BSL-1.0", "CC0", "WTFPL",
+                          "ARTISTIC", "CURL", "OPENSSL", "LIBPNG", "HPND", "NCSA", "BLESSING", "UNICODE",
+                          "FTL", "JSON", "BOOST", "ZPL", "W3C", "UPL", "BZIP2", "LIBTIFF", "MS-PL", "AFL",
+                          "OFL", "NTP", "IJG", "TCL", "SGI-B", "APSL-", "ICU", "BEERWARE", "POSTGRESQL",
+                          "SSH-", "CC-PDDC", "BZIP", "NAIST", "SAX-PD", "FSF", "LPD-", "MULANPSL", "BLUEOAK")
+            WEAK = ("MPL", "EPL", "CDDL", "CPL", "EUPL", "CECILL", "OSL", "LGPL", "CC-BY-SA", "MS-RL")
+
+
+            def token_family(tok):
+                t = re.sub(r"\s+WITH\s+.*$", "", tok.strip(), flags=re.I).strip()
+                u = t.upper()
+                if not t or u in ("NOASSERTION", "NONE"):
+                    return None
+                if "AGPL" in u or "AFFERO" in u:
+                    return "network"
+                if "LGPL" in u or "LESSER GENERAL" in u or "LIBRARY GENERAL" in u:
+                    return "weak"
+                if "GPL" in u or "GENERAL PUBLIC LICEN" in u:
+                    return "strong"
+                if u.startswith(WEAK):
+                    return "weak"
+                if u.startswith(PERMISSIVE) or re.search(r"\b(mit|apache|bsd)\b", t, re.I):
+                    return "permissive"
+                return "other"
+
+
+            def expr_family(expr):
+                # SPDX-style expressions: AND = all apply (strictest wins), OR = licensee
+                # picks the least restrictive. Plain names/ids skip the parser entirely.
+                if not re.search(r"\s(AND|OR)\s|[()]", expr, re.I):
+                    return token_family(expr)
+                toks = [t.strip() for t in re.split(r"(\(|\)|\s+AND\s+|\s+OR\s+)", expr, flags=re.I) if t and t.strip()]
+                pos = [0]
+
+                def peek():
+                    return toks[pos[0]].upper() if pos[0] < len(toks) else ""
+
+                def pick(fams, fn):
+                    known = [f for f in fams if f]
+                    return fn(known, key=RANK.get) if known else None
+
+                def p_or():
+                    v = [p_and()]
+                    while peek() == "OR":
+                        pos[0] += 1
+                        v.append(p_and())
+                    return pick(v, min)
+
+                def p_and():
+                    v = [p_atom()]
+                    while peek() == "AND":
+                        pos[0] += 1
+                        v.append(p_atom())
+                    return pick(v, max)
+
+                def p_atom():
+                    t = toks[pos[0]] if pos[0] < len(toks) else ""
+                    pos[0] += 1
+                    if t == "(":
+                        v = p_or()
+                        if peek() == ")":
+                            pos[0] += 1
+                        return v
+                    return token_family(t)
+
+                return p_or()
+
+
+            def component_license(comp):
+                entries = []
+                for lic in comp.get("licenses") or []:
+                    if "expression" in lic:
+                        entries.append(lic["expression"])
+                    elif "license" in lic:
+                        entries.append(lic["license"].get("id") or lic["license"].get("name") or "")
+                entries = [e.strip() for e in entries if e and e.strip()]
+                if not entries:
+                    return "none", "", [], None
+                known = [f for f in (expr_family(e) for e in entries) if f]
+                label = " + ".join(entries)
+                if not known:
+                    return "unknown", label, entries, None
+                return max(known, key=RANK.get), label, entries, min(known, key=RANK.get)
+
+
+            def api_get(path):
+                host = os.environ["KUBERNETES_SERVICE_HOST"]
+                port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+                with open(SA + "/token") as f:
+                    token = f.read().strip()
+                ctx = ssl.create_default_context(cafile=SA + "/ca.crt")
+                req = urllib.request.Request("https://%s:%s%s" % (host, port, path),
+                                             headers={"Authorization": "Bearer " + token})
+                with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+                    return json.load(r)
+
+
+            def iter_items():
+                cont = None
+                while True:
+                    q = "limit=%d" % PAGE + ("&continue=" + urllib.parse.quote(cont) if cont else "")
+                    page = api_get("/apis/aquasecurity.github.io/v1alpha1/sbomreports?" + q)
+                    for it in page.get("items", []):
+                        yield it
+                    cont = page.get("metadata", {}).get("continue")
+                    if not cont:
+                        break
+
+
+            def esc(x):
+                return html.escape(str(x if x is not None else ""))
+
+
+            def eco_of(comp):
+                m = re.match(r"pkg:([^/]+)/", comp.get("purl") or "")
+                return m.group(1) if m else (comp.get("type") or "unknown")
+
+
+            def collect():
+                pkgs = {}                              # (eco, name, version) -> (family, label)
+                lic_pkgs = defaultdict(set)            # label -> unique pkg keys
+                lic_occ = Counter()                    # label -> occurrences (per image)
+                lic_fam = {}
+                eco_total, eco_lic = Counter(), Counter()
+                reports = []
+                n = 0
+                with gzip.open(OUT_GZ, "wt", compresslevel=6) as gz:
+                    gz.write('{"apiVersion":"v1","kind":"List","metadata":{},"items":[')
+                    for it in iter_items():
+                        gz.write(("," if n else "") + json.dumps(it, separators=(",", ":")))
+                        n += 1
+                        rep = it.get("report", {})
+                        art = rep.get("artifact", {})
+                        counts, flagged, total = Counter(), [], 0
+                        for c in rep.get("components", {}).get("components", []) or []:
+                            if c.get("type") == "operating-system":
+                                continue
+                            fam, label, entries, lenient = component_license(c)
+                            eco = eco_of(c)
+                            key = (eco, c.get("name", ""), c.get("version", ""))
+                            total += 1
+                            counts[fam] += 1
+                            if key not in pkgs:
+                                pkgs[key] = (fam, label)
+                                eco_total[eco] += 1
+                                if fam != "none":
+                                    eco_lic[eco] += 1
+                                for e in entries:
+                                    lic_pkgs[e].add(key)
+                            for e in entries:
+                                lic_occ[e] += 1
+                                lic_fam.setdefault(e, expr_family(e) or "unknown")
+                            if fam in ("weak", "strong", "network"):
+                                flagged.append((fam, c.get("name", ""), c.get("version", ""), eco, label, lenient))
+                        meta = it.get("metadata", {})
+                        reports.append({
+                            "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
+                            "image": "%s:%s" % (art.get("repository", ""), art.get("tag", "")) if art.get("tag") else art.get("repository", ""),
+                            "total": total, "counts": counts, "flagged": flagged,
+                        })
+                    gz.write("]}")
+                if n == 0:
+                    sys.exit("no SbomReports found - refusing to publish an empty export")
+                return pkgs, lic_pkgs, lic_occ, lic_fam, eco_total, eco_lic, reports
+
+
+            CSS = (
+                "body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px;max-width:1400px}"
+                "h1{font-size:20px;margin:0 0 4px}h2{font-size:15px;margin:28px 0 8px;color:#cbd5e1}"
+                ".meta{color:#94a3b8;font-size:13px;margin-bottom:18px}.note{color:#94a3b8;font-size:12px;margin:6px 0 14px}"
+                ".cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px}"
+                ".card{background:#1e293b;border-radius:8px;padding:12px 16px;min-width:150px}"
+                ".card b{display:block;font-size:22px}.card span{color:#94a3b8;font-size:12px}"
+                "table{border-collapse:collapse;width:100%;background:#1e293b;margin-bottom:12px}"
+                "th,td{padding:5px 10px;border-bottom:1px solid #334155;text-align:left;font-size:13px}"
+                "th{background:#0b1220;color:#94a3b8;position:sticky;top:0}tr:hover{background:#273449}"
+                ".num{text-align:right;font-variant-numeric:tabular-nums}"
+                ".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff;margin-right:4px}"
+                ".bar{display:flex;height:26px;border-radius:6px;overflow:hidden;margin:8px 0}.bar div{height:100%}"
+                ".legend span{margin-right:14px;font-size:12px;color:#cbd5e1}.dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px}"
+                ".scroll{max-height:420px;overflow:auto;border-radius:6px}"
+                "input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:6px 10px;border-radius:6px;width:300px;margin-bottom:8px}"
+                "details{background:#1e293b;border-radius:6px;margin-bottom:6px}summary{cursor:pointer;padding:8px 14px;font-size:13px}"
+                "summary:hover{background:#273449}.row{padding:8px 14px;font-size:13px;background:#1e293b;border-radius:6px;margin-bottom:6px}"
+                ".inner{margin:0 14px 12px;width:calc(100% - 28px)}"
             )
-            page = (
-                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-                "<title>Trivy VulnerabilityReports</title><style>%s</style></head><body>"
-                "<h1>Trivy VulnerabilityReports export</h1>"
-                "<div class='meta'>%d reports &middot; %d total findings</div>"
-                "<table><thead><tr><th>Namespace</th><th>Workload</th><th>Image</th>%s"
-                "<th class='num'>Total</th></tr></thead><tbody>%s</tbody></table>%s"
-                "</body></html>"
-            ) % (style, len(items), grand_total, head_cells, "".join(summary_rows), "".join(detail_sections))
-            with open(out_path, "w") as f:
-                f.write(page)
+            JS = ("function f(b,s){var q=b.value.toLowerCase();document.querySelectorAll(s).forEach(function(e)"
+                  "{e.style.display=e.textContent.toLowerCase().indexOf(q)<0?'none':'';});}")
 
-        if __name__ == "__main__":
-            main(sys.argv[1], sys.argv[2])
-        PYEOF
-        python3 /tmp/render.py /tmp/vulnerabilityreports.json /tmp/vulnerabilityreports.html
-        echo "html size: $(wc -c < /tmp/vulnerabilityreports.html) bytes"
-      command:
-      - /bin/sh
-      - -c
-      env:
-      - name: PYTHONDONTWRITEBYTECODE
-        value: '1'
-      - name: HOME
-        value: /tmp
-      image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
-      resources:
-        limits:
-          cpu: 300m
-          memory: 256Mi
-        requests:
-          cpu: 50m
-          memory: 96Mi
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop:
-          - ALL
-        privileged: false
-        readOnlyRootFilesystem: true
-        runAsGroup: 1001
-        runAsNonRoot: true
-        runAsUser: 1001
-        seccompProfile:
-          type: RuntimeDefault
-      volumeMounts:
-      - mountPath: /tmp
-        name: tmp
-    initContainers:
-    - args:
-      - |
-        set -eu
-        echo "exporting VulnerabilityReports..."
-        kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces -o json \
-          | gzip -9 > /tmp/vulnerabilityreports.json.gz
-        echo "report count: $(kubectl get vulnerabilityreports.aquasecurity.github.io --all-namespaces --no-headers | wc -l)"
-        echo "archive size: $(wc -c < /tmp/vulnerabilityreports.json.gz) bytes"
-      command:
-      - /bin/sh
-      - -c
-      image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
-      name: export-json
-      resources:
-        limits:
-          cpu: 300m
-          memory: 256Mi
-        requests:
-          cpu: 50m
-          memory: 64Mi
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop:
-          - ALL
-        privileged: false
-        readOnlyRootFilesystem: true
-        runAsGroup: 1001
-        runAsNonRoot: true
-        runAsUser: 1001
-        seccompProfile:
-          type: RuntimeDefault
-      volumeMounts:
-      - mountPath: /tmp
-        name: tmp
-    name: backup
-    outputs:
-      artifacts:
-      - archive:
-          none: {}
-        name: vulnerabilityreports
-        path: /tmp/vulnerabilityreports.json.gz
-        s3:
-          accessKeySecret:
-            key: TRIVY_BACKUP_ACCESS_KEY
-            name: minio-trivy-backup-credentials
-          bucket: trivy-reports
-          endpoint: minio.minio.svc.cluster.local:9000
-          insecure: true
-          key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
-          secretKeySecret:
-            key: TRIVY_BACKUP_SECRET_KEY
-            name: minio-trivy-backup-credentials
-      - archive:
-          none: {}
-        name: vulnerabilityreports-html
-        path: /tmp/vulnerabilityreports.html
-        s3:
-          accessKeySecret:
-            key: TRIVY_BACKUP_ACCESS_KEY
-            name: minio-trivy-backup-credentials
-          bucket: trivy-reports
-          endpoint: minio.minio.svc.cluster.local:9000
-          insecure: true
-          key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.html
-          secretKeySecret:
-            key: TRIVY_BACKUP_SECRET_KEY
-            name: minio-trivy-backup-credentials
-    retryStrategy:
-      limit: '2'
-      retryPolicy: OnError
+
+            def badge(fam, text):
+                return "<span class='badge' style='background:%s'>%s</span>" % (FAM_COLOR[fam], esc(text))
+
+
+            def render(pkgs, lic_pkgs, lic_occ, lic_fam, eco_total, eco_lic, reports):
+                fam_u, fam_o = Counter(), Counter()
+                for fam, _ in pkgs.values():
+                    fam_u[fam] += 1
+                for r in reports:
+                    for fam, n in r["counts"].items():
+                        fam_o[fam] += n
+                total_u, total_o = len(pkgs), sum(fam_o.values())
+                with_lic = total_u - fam_u["none"]
+                copyleft = fam_u["weak"] + fam_u["strong"] + fam_u["network"]
+                o = ["<!DOCTYPE html><html><head><meta charset='utf-8'><title>SBOM licenses</title><style>%s</style></head><body>" % CSS,
+                     "<h1>SBOM license report</h1>",
+                     "<div class='meta'>%d images &middot; %d component occurrences &middot; %d unique packages (ecosystem + name + version)</div>"
+                     % (len(reports), total_o, total_u),
+                     "<div class='cards'>"
+                     "<div class='card'><b>%d</b><span>unique packages</span></div>"
+                     "<div class='card'><b>%.0f%%</b><span>carry license data</span></div>"
+                     "<div class='card'><b>%d</b><span>copyleft packages (LGPL/GPL/AGPL/MPL...)</span></div>"
+                     "<div class='card'><b>%d</b><span>strong + network copyleft</span></div></div>"
+                     % (total_u, 100.0 * with_lic / max(total_u, 1), copyleft, fam_u["strong"] + fam_u["network"])]
+                o.append("<h2>License families (unique packages)</h2><div class='bar'>")
+                for k, n, c in FAMS:
+                    if fam_u[k]:
+                        o.append("<div style='width:%.2f%%;background:%s' title='%s: %d'></div>" % (100.0 * fam_u[k] / max(total_u, 1), c, esc(n), fam_u[k]))
+                o.append("</div><div class='legend'>")
+                for k, n, c in FAMS:
+                    o.append("<span><i class='dot' style='background:%s'></i>%s %d</span>" % (c, esc(n), fam_u[k]))
+                o.append("</div><table><thead><tr><th>Family</th><th class='num'>Unique packages</th><th class='num'>%</th>"
+                         "<th class='num'>Occurrences (all images)</th></tr></thead><tbody>")
+                for k, n, c in FAMS:
+                    o.append("<tr><td>%s</td><td class='num'>%d</td><td class='num'>%.1f</td><td class='num'>%d</td></tr>"
+                             % (badge(k, n), fam_u[k], 100.0 * fam_u[k] / max(total_u, 1), fam_o[k]))
+                o.append("</tbody></table>")
+                o.append("<h2>Why so much &ldquo;No license data&rdquo;? Coverage by ecosystem</h2>"
+                         "<div class='note'>License info only exists where the package manager records it. Go binaries embed none, "
+                         "so Go modules always land in &ldquo;No license data&rdquo;.</div>"
+                         "<table><thead><tr><th>Ecosystem</th><th class='num'>Unique packages</th><th class='num'>With license</th>"
+                         "<th class='num'>Coverage</th></tr></thead><tbody>")
+                for eco, n in eco_total.most_common():
+                    o.append("<tr><td>%s</td><td class='num'>%d</td><td class='num'>%d</td><td class='num'>%.0f%%</td></tr>"
+                             % (esc(eco), n, eco_lic[eco], 100.0 * eco_lic[eco] / n))
+                o.append("</tbody></table><h2>Licenses</h2>"
+                         "<div class='note'>Each individual license entry is counted; a package listing several licenses appears under each.</div>"
+                         "<input placeholder='filter licenses...' oninput=\"f(this,'#lic tbody tr')\">"
+                         "<div class='scroll'><table id='lic'><thead><tr><th>License</th><th>Family</th>"
+                         "<th class='num'>Unique packages</th><th class='num'>Occurrences</th></tr></thead><tbody>")
+                for label, keys in sorted(lic_pkgs.items(), key=lambda kv: -len(kv[1])):
+                    short = label if len(label) <= 70 else label[:67] + "..."
+                    o.append("<tr><td title='%s'>%s</td><td>%s</td><td class='num'>%d</td><td class='num'>%d</td></tr>"
+                             % (esc(label), esc(short), badge(lic_fam[label], FAM_NAME[lic_fam[label]].split(" (")[0]), len(keys), lic_occ[label]))
+                o.append("</tbody></table></div><h2>Images &mdash; copyleft exposure first</h2>"
+                         "<div class='note'>Expand an image to see its LGPL/GPL/AGPL/MPL-family packages. Multiple license entries on one "
+                         "component are treated as all-applying (strictest wins); OR-expressions take the least restrictive option.</div>"
+                         "<input placeholder='filter images or packages...' oninput=\"f(this,'.img')\">")
+                order = lambda r: tuple(-r["counts"][k] for k in ("network", "strong", "weak"))
+                for r in sorted(reports, key=order):
+                    bs = "".join(badge(k, "%d %s" % (r["counts"][k], FAM_NAME[k].split(" (")[0].split(" /")[0]))
+                                 for k, _, _ in FAMS if r["counts"][k] and k not in ("permissive",))
+                    head = "%s/%s &mdash; %s &nbsp; <small>%d pkgs</small> &nbsp; %s" % (esc(r["ns"]), esc(r["name"]), esc(r["image"]), r["total"], bs)
+                    if not r["flagged"]:
+                        o.append("<div class='row img'>%s</div>" % head)
+                        continue
+                    rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s%s</td></tr>"
+                                   % (badge(f, FAM_NAME[f].split(" (")[0]), esc(nm), esc(ver), esc(lab if len(lab) <= 70 else lab[:67] + "..."),
+                                      " <small style='color:#94a3b8'>&mdash; least restrictive listed option: %s</small>" % esc(FAM_NAME[lo].split(" (")[0]) if lo and lo != f else "")
+                                   for f, nm, ver, eco, lab, lo in sorted(r["flagged"], key=lambda x: (-RANK[x[0]], x[1])))
+                    o.append("<details class='img'><summary>%s</summary><table class='inner'><thead><tr><th>Family</th><th>Package</th>"
+                             "<th>Version</th><th>License</th></tr></thead><tbody>%s</tbody></table></details>" % (head, rows))
+                o.append("<script>%s</script></body></html>" % JS)
+                with open(OUT_HTML, "w") as fh:
+                    fh.write("".join(o))
+
+
+            if __name__ == "__main__":
+                data = collect()
+                render(*data)
+                print("exported %d SbomReports, %d unique packages" % (len(data[6]), len(data[0])))
+            PYEOF
+            python3 /tmp/sbom_licenses.py /tmp
+            echo "export size: $(wc -c < /tmp/sbomreports.json.gz) bytes, html size: $(wc -c < /tmp/sbomreports-licenses.html) bytes"
+        env:
+          - name: PYTHONDONTWRITEBYTECODE
+            value: "1"
+          - name: HOME
+            value: /tmp
+        resources:
+          limits:
+            cpu: 300m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 96Mi
+        volumeMounts:
+          - name: tmp
+            mountPath: /tmp
+        securityContext:
+          capabilities:
+            drop:
+              - ALL
+          privileged: false
+          runAsUser: 1001
+          runAsGroup: 1001
+          runAsNonRoot: true
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
+      retryStrategy:
+        limit: "2"
+        retryPolicy: OnError
+  entrypoint: backup-all
+  arguments: {}
+  serviceAccountName: argo-workflow
   volumes:
-  - emptyDir:
-      sizeLimit: 128Mi
-    name: tmp
+    - name: tmp
+      emptyDir:
+        sizeLimit: 128Mi
+  activeDeadlineSeconds: 600
+  podGC:
+    strategy: OnPodCompletion
+    deleteDelayDuration: 5m
