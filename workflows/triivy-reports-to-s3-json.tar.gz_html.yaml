@@ -1,71 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
 metadata:
-  name: trivy-reports-backup
-  namespace: argo-workflows
-  uid: 5b921463-900c-450d-9be8-06aa47e167f2
-  resourceVersion: "22245837"
-  generation: 6
-  creationTimestamp: "2026-09-24T13:45:43Z"
+  annotations:
+    argocd.argoproj.io/tracking-id: >-
+      argo-workflows-config:argoproj.io/WorkflowTemplate:argo-workflows/trivy-reports-backup
   labels:
     app.kubernetes.io/instance: argo-workflows-config
     app.kubernetes.io/managed-by: Helm
     app.kubernetes.io/name: argo-workflows-config
     helm.sh/chart: app-template-5.1.0
+  name: trivy-reports-backup
+  namespace: argo-workflows
 spec:
+  activeDeadlineSeconds: 600
+  entrypoint: backup-all
+  podGC:
+    deleteDelayDuration: 5m
+    strategy: OnPodCompletion
+  serviceAccountName: argo-workflow
   templates:
-    - name: backup-all
-      inputs: {}
-      outputs: {}
-      metadata: {}
-      dag:
+    - dag:
+        failFast: false
         tasks:
           - name: vulnerabilityreports
             template: backup
-            arguments: {}
           - name: sbomreports
             template: sbom-report
-            arguments: {}
-        failFast: false
-    - name: backup
-      inputs: {}
-      outputs:
-        artifacts:
-          - name: vulnerabilityreports
-            path: /tmp/vulnerabilityreports.json.gz
-            s3:
-              endpoint: minio.minio.svc.cluster.local:9000
-              bucket: trivy-reports
-              insecure: true
-              accessKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_ACCESS_KEY
-              secretKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_SECRET_KEY
-              key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
-            archive:
-              none: {}
-          - name: vulnerabilityreports-html
-            path: /tmp/vulnerabilityreports.html
-            s3:
-              endpoint: minio.minio.svc.cluster.local:9000
-              bucket: trivy-reports
-              insecure: true
-              accessKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_ACCESS_KEY
-              secretKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_SECRET_KEY
-              key: vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.html
-            archive:
-              none: {}
-      metadata: {}
-      container:
-        name: ""
-        image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
-        command:
-          - /bin/sh
-          - -c
+      name: backup-all
+    - container:
         args:
           - >
             set -eu
@@ -205,11 +167,16 @@ spec:
             /tmp/vulnerabilityreports.html
 
             echo "html size: $(wc -c < /tmp/vulnerabilityreports.html) bytes"
+        command:
+          - /bin/sh
+          - '-c'
         env:
           - name: PYTHONDONTWRITEBYTECODE
-            value: "1"
+            value: '1'
           - name: HOME
             value: /tmp
+        image: >-
+          mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
         resources:
           limits:
             cpu: 300m
@@ -217,28 +184,23 @@ spec:
           requests:
             cpu: 50m
             memory: 96Mi
-        volumeMounts:
-          - name: tmp
-            mountPath: /tmp
         securityContext:
+          allowPrivilegeEscalation: false
           capabilities:
             drop:
               - ALL
           privileged: false
-          runAsUser: 1001
+          readOnlyRootFilesystem: true
           runAsGroup: 1001
           runAsNonRoot: true
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
+          runAsUser: 1001
           seccompProfile:
             type: RuntimeDefault
+        volumeMounts:
+          - mountPath: /tmp
+            name: tmp
       initContainers:
-        - name: export-json
-          image: bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
-          command:
-            - /bin/sh
-            - -c
-          args:
+        - args:
             - >
               set -eu
 
@@ -253,6 +215,12 @@ spec:
 
               echo "archive size: $(wc -c < /tmp/vulnerabilityreports.json.gz)
               bytes"
+          command:
+            - /bin/sh
+            - '-c'
+          image: >-
+            bitnami/kubectl@sha256:190ebe23a27084c9477b48cf9503472608197792456857ac8fdcf2eb877aa34e
+          name: export-json
           resources:
             limits:
               cpu: 300m
@@ -260,77 +228,70 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
           securityContext:
+            allowPrivilegeEscalation: false
             capabilities:
               drop:
                 - ALL
             privileged: false
-            runAsUser: 1001
+            readOnlyRootFilesystem: true
             runAsGroup: 1001
             runAsNonRoot: true
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
+            runAsUser: 1001
             seccompProfile:
               type: RuntimeDefault
-      retryStrategy:
-        limit: "2"
-        retryPolicy: OnError
-    - name: sbom-report
-      inputs: {}
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+      name: backup
       outputs:
         artifacts:
-          - name: sbomreports
-            path: /tmp/sbomreports.json.gz
-            s3:
-              endpoint: minio.minio.svc.cluster.local:9000
-              bucket: trivy-reports
-              insecure: true
-              accessKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_ACCESS_KEY
-              secretKeySecret:
-                name: minio-trivy-backup-credentials
-                key: TRIVY_BACKUP_SECRET_KEY
-              key: sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
-            archive:
+          - archive:
               none: {}
-          - name: sbomreports-licenses-html
-            path: /tmp/sbomreports-licenses.html
+            name: vulnerabilityreports
+            path: /tmp/vulnerabilityreports.json.gz
             s3:
-              endpoint: minio.minio.svc.cluster.local:9000
-              bucket: trivy-reports
-              insecure: true
               accessKeySecret:
-                name: minio-trivy-backup-credentials
                 key: TRIVY_BACKUP_ACCESS_KEY
-              secretKeySecret:
                 name: minio-trivy-backup-credentials
+              bucket: trivy-reports
+              endpoint: minio.minio.svc.cluster.local:9000
+              insecure: true
+              key: >-
+                vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json.gz
+              secretKeySecret:
                 key: TRIVY_BACKUP_SECRET_KEY
-              key: sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}-licenses.html
-            archive:
+                name: minio-trivy-backup-credentials
+          - archive:
               none: {}
-      metadata: {}
-      container:
-        name: ""
-        image: mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
-        command:
-          - /bin/sh
-          - -c
+            name: vulnerabilityreports-html
+            path: /tmp/vulnerabilityreports.html
+            s3:
+              accessKeySecret:
+                key: TRIVY_BACKUP_ACCESS_KEY
+                name: minio-trivy-backup-credentials
+              bucket: trivy-reports
+              endpoint: minio.minio.svc.cluster.local:9000
+              insecure: true
+              key: >-
+                vulnerabilityreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.html
+              secretKeySecret:
+                key: TRIVY_BACKUP_SECRET_KEY
+                name: minio-trivy-backup-credentials
+      retryStrategy:
+        limit: '2'
+        retryPolicy: OnError
+    - container:
         args:
-          - |
+          - >
             set -eu
+
             cat > /tmp/sbom_licenses.py <<'PYEOF'
-            import gzip, html, json, os, re, ssl, sys, urllib.parse, urllib.request
+
+            import html, json, re, sys
+
             from collections import Counter, defaultdict
 
-            OUT_DIR = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
-            OUT_GZ = os.path.join(OUT_DIR, "sbomreports.json.gz")
-            OUT_HTML = os.path.join(OUT_DIR, "sbomreports-licenses.html")
-            SA = "/var/run/secrets/kubernetes.io/serviceaccount"
-            PAGE = 10
 
             FAMS = [
                 ("permissive", "Permissive", "#15803d"),
@@ -341,16 +302,24 @@ spec:
                 ("unknown", "Unknown (NOASSERTION)", "#6b7280"),
                 ("none", "No license data", "#475569"),
             ]
+
             FAM_NAME = dict((k, n) for k, n, _ in FAMS)
+
             FAM_COLOR = dict((k, c) for k, _, c in FAMS)
-            RANK = {"permissive": 0, "other": 1, "weak": 2, "strong": 3, "network": 4}
-            PERMISSIVE = ("MIT", "APACHE", "BSD", "ISC", "ZLIB", "0BSD", "X11", "X-11", "UNLICENSE",
+
+            RANK = {"permissive": 0, "other": 1, "weak": 2, "strong": 3,
+            "network": 4}
+
+            PERMISSIVE = ("MIT", "APACHE", "BSD", "ISC", "ZLIB", "0BSD", "X11",
+            "X-11", "UNLICENSE",
                           "PUBLIC-DOMAIN", "PUBLIC DOMAIN", "PSF", "PYTHON", "BSL-1.0", "CC0", "WTFPL",
                           "ARTISTIC", "CURL", "OPENSSL", "LIBPNG", "HPND", "NCSA", "BLESSING", "UNICODE",
                           "FTL", "JSON", "BOOST", "ZPL", "W3C", "UPL", "BZIP2", "LIBTIFF", "MS-PL", "AFL",
                           "OFL", "NTP", "IJG", "TCL", "SGI-B", "APSL-", "ICU", "BEERWARE", "POSTGRESQL",
                           "SSH-", "CC-PDDC", "BZIP", "NAIST", "SAX-PD", "FSF", "LPD-", "MULANPSL", "BLUEOAK")
-            WEAK = ("MPL", "EPL", "CDDL", "CPL", "EUPL", "CECILL", "OSL", "LGPL", "CC-BY-SA", "MS-RL")
+            WEAK = ("MPL", "EPL", "CDDL", "CPL", "EUPL", "CECILL", "OSL",
+            "LGPL", "CC-BY-SA", "MS-RL")
+
 
 
             def token_family(tok):
@@ -430,28 +399,46 @@ spec:
                 return max(known, key=RANK.get), label, entries, min(known, key=RANK.get)
 
 
-            def api_get(path):
-                host = os.environ["KUBERNETES_SERVICE_HOST"]
-                port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
-                with open(SA + "/token") as f:
-                    token = f.read().strip()
-                ctx = ssl.create_default_context(cafile=SA + "/ca.crt")
-                req = urllib.request.Request("https://%s:%s%s" % (host, port, path),
-                                             headers={"Authorization": "Bearer " + token})
-                with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
-                    return json.load(r)
+            def iter_items(path):
+                # Streams the "items" array of a (possibly ~100MB) Kubernetes List JSON one
+                # object at a time, so memory stays at one report instead of the whole
+                # file. Works on any JSON formatting (compact or kubectl's indented).
+                dec = json.JSONDecoder()
+                with open(path) as f:
+                    st = {"buf": "", "eof": False}
 
+                    def more():
+                        c = f.read(1 << 20)
+                        if not c:
+                            st["eof"] = True
+                        st["buf"] += c
 
-            def iter_items():
-                cont = None
-                while True:
-                    q = "limit=%d" % PAGE + ("&continue=" + urllib.parse.quote(cont) if cont else "")
-                    page = api_get("/apis/aquasecurity.github.io/v1alpha1/sbomreports?" + q)
-                    for it in page.get("items", []):
-                        yield it
-                    cont = page.get("metadata", {}).get("continue")
-                    if not cont:
-                        break
+                    m = None
+                    while not m:
+                        m = re.search(r'"items"\s*:\s*\[', st["buf"])
+                        if not m:
+                            if st["eof"]:
+                                return
+                            more()
+                    st["buf"] = st["buf"][m.end():]
+                    while True:
+                        st["buf"] = st["buf"].lstrip(" \t\r\n,")
+                        if not st["buf"]:
+                            if st["eof"]:
+                                return
+                            more()
+                            continue
+                        if st["buf"][0] == "]":
+                            return
+                        try:
+                            obj, end = dec.raw_decode(st["buf"])
+                        except json.JSONDecodeError:
+                            if st["eof"]:
+                                raise
+                            more()
+                            continue
+                        yield obj
+                        st["buf"] = st["buf"][end:]
 
 
             def esc(x):
@@ -463,7 +450,7 @@ spec:
                 return m.group(1) if m else (comp.get("type") or "unknown")
 
 
-            def collect():
+            def collect(path):
                 pkgs = {}                              # (eco, name, version) -> (family, label)
                 lic_pkgs = defaultdict(set)            # label -> unique pkg keys
                 lic_occ = Counter()                    # label -> occurrences (per image)
@@ -471,43 +458,39 @@ spec:
                 eco_total, eco_lic = Counter(), Counter()
                 reports = []
                 n = 0
-                with gzip.open(OUT_GZ, "wt", compresslevel=6) as gz:
-                    gz.write('{"apiVersion":"v1","kind":"List","metadata":{},"items":[')
-                    for it in iter_items():
-                        gz.write(("," if n else "") + json.dumps(it, separators=(",", ":")))
-                        n += 1
-                        rep = it.get("report", {})
-                        art = rep.get("artifact", {})
-                        counts, flagged, total = Counter(), [], 0
-                        for c in rep.get("components", {}).get("components", []) or []:
-                            if c.get("type") == "operating-system":
-                                continue
-                            fam, label, entries, lenient = component_license(c)
-                            eco = eco_of(c)
-                            key = (eco, c.get("name", ""), c.get("version", ""))
-                            total += 1
-                            counts[fam] += 1
-                            if key not in pkgs:
-                                pkgs[key] = (fam, label)
-                                eco_total[eco] += 1
-                                if fam != "none":
-                                    eco_lic[eco] += 1
-                                for e in entries:
-                                    lic_pkgs[e].add(key)
+                for it in iter_items(path):
+                    n += 1
+                    rep = it.get("report", {})
+                    art = rep.get("artifact", {})
+                    counts, flagged, total = Counter(), [], 0
+                    for c in rep.get("components", {}).get("components", []) or []:
+                        if c.get("type") == "operating-system":
+                            continue
+                        fam, label, entries, lenient = component_license(c)
+                        eco = eco_of(c)
+                        key = (eco, c.get("name", ""), c.get("version", ""))
+                        total += 1
+                        counts[fam] += 1
+                        if key not in pkgs:
+                            pkgs[key] = (fam, label)
+                            eco_total[eco] += 1
+                            if fam != "none":
+                                eco_lic[eco] += 1
                             for e in entries:
-                                lic_occ[e] += 1
-                                lic_fam.setdefault(e, expr_family(e) or "unknown")
-                            if fam in ("weak", "strong", "network"):
-                                flagged.append((fam, c.get("name", ""), c.get("version", ""), eco, label, lenient))
-                        meta = it.get("metadata", {})
-                        reports.append({
-                            "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
-                            "image": "%s:%s" % (art.get("repository", ""), art.get("tag", "")) if art.get("tag") else art.get("repository", ""),
-                            "total": total, "counts": counts, "flagged": flagged,
-                        })
-                    gz.write("]}")
+                                lic_pkgs[e].add(key)
+                        for e in entries:
+                            lic_occ[e] += 1
+                            lic_fam.setdefault(e, expr_family(e) or "unknown")
+                        if fam in ("weak", "strong", "network"):
+                            flagged.append((fam, c.get("name", ""), c.get("version", ""), eco, label, lenient))
+                    meta = it.get("metadata", {})
+                    reports.append({
+                        "ns": meta.get("namespace", ""), "name": meta.get("name", ""),
+                        "image": "%s:%s" % (art.get("repository", ""), art.get("tag", "")) if art.get("tag") else art.get("repository", ""),
+                        "total": total, "counts": counts, "flagged": flagged,
+                    })
                 if n == 0:
-                    sys.exit("no SbomReports found - refusing to publish an empty export")
+                    sys.exit("no SbomReports in %s - refusing to write an empty report" % path)
                 return pkgs, lic_pkgs, lic_occ, lic_fam, eco_total, eco_lic, reports
 
 
@@ -531,7 +514,9 @@ spec:
                 "summary:hover{background:#273449}.row{padding:8px 14px;font-size:13px;background:#1e293b;border-radius:6px;margin-bottom:6px}"
                 ".inner{margin:0 14px 12px;width:calc(100% - 28px)}"
             )
-            JS = ("function f(b,s){var q=b.value.toLowerCase();document.querySelectorAll(s).forEach(function(e)"
+
+            JS = ("function f(b,s){var
+            q=b.value.toLowerCase();document.querySelectorAll(s).forEach(function(e)"
                   "{e.style.display=e.textContent.toLowerCase().indexOf(q)<0?'none':'';});}")
 
 
@@ -539,7 +524,8 @@ spec:
                 return "<span class='badge' style='background:%s'>%s</span>" % (FAM_COLOR[fam], esc(text))
 
 
-            def render(pkgs, lic_pkgs, lic_occ, lic_fam, eco_total, eco_lic, reports):
+            def render(out_path, pkgs, lic_pkgs, lic_occ, lic_fam, eco_total,
+            eco_lic, reports):
                 fam_u, fam_o = Counter(), Counter()
                 for fam, _ in pkgs.values():
                     fam_u[fam] += 1
@@ -608,22 +594,33 @@ spec:
                     o.append("<details class='img'><summary>%s</summary><table class='inner'><thead><tr><th>Family</th><th>Package</th>"
                              "<th>Version</th><th>License</th></tr></thead><tbody>%s</tbody></table></details>" % (head, rows))
                 o.append("<script>%s</script></body></html>" % JS)
-                with open(OUT_HTML, "w") as fh:
+                with open(out_path, "w") as fh:
                     fh.write("".join(o))
 
 
             if __name__ == "__main__":
-                data = collect()
-                render(*data)
-                print("exported %d SbomReports, %d unique packages" % (len(data[6]), len(data[0])))
+                if len(sys.argv) != 3:
+                    sys.exit("usage: sbom_licenses.py <sbomreports.json> <licences.html>")
+                data = collect(sys.argv[1])
+                render(sys.argv[2], *data)
+                print("rendered %d SbomReports, %d unique packages -> %s" % (len(data[6]), len(data[0]), sys.argv[2]))
             PYEOF
-            python3 /tmp/sbom_licenses.py /tmp
-            echo "export size: $(wc -c < /tmp/sbomreports.json.gz) bytes, html size: $(wc -c < /tmp/sbomreports-licenses.html) bytes"
+
+            python3 /tmp/sbom_licenses.py /tmp/sbomreports.json
+            /tmp/licences.html
+
+            echo "sbomreports.json: $(wc -c < /tmp/sbomreports.json) bytes,
+            licences.html: $(wc -c < /tmp/licences.html) bytes"
+        command:
+          - /bin/sh
+          - '-c'
         env:
           - name: PYTHONDONTWRITEBYTECODE
-            value: "1"
+            value: '1'
           - name: HOME
             value: /tmp
+        image: >-
+          mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
         resources:
           limits:
             cpu: 300m
@@ -631,32 +628,141 @@ spec:
           requests:
             cpu: 50m
             memory: 96Mi
-        volumeMounts:
-          - name: tmp
-            mountPath: /tmp
         securityContext:
+          allowPrivilegeEscalation: false
           capabilities:
             drop:
               - ALL
           privileged: false
-          runAsUser: 1001
+          readOnlyRootFilesystem: true
           runAsGroup: 1001
           runAsNonRoot: true
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
+          runAsUser: 1001
           seccompProfile:
             type: RuntimeDefault
+        volumeMounts:
+          - mountPath: /tmp
+            name: tmp
+      initContainers:
+        - args:
+            - |
+              set -eu
+              cat > /tmp/sbom_export.py <<'PYEOF'
+              import json, os, ssl, sys, urllib.parse, urllib.request
+
+              SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+              PAGE = 10
+
+
+              def api_get(path):
+                  host = os.environ["KUBERNETES_SERVICE_HOST"]
+                  port = os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+                  with open(SA + "/token") as f:
+                      token = f.read().strip()
+                  ctx = ssl.create_default_context(cafile=SA + "/ca.crt")
+                  req = urllib.request.Request("https://%s:%s%s" % (host, port, path),
+                                               headers={"Authorization": "Bearer " + token})
+                  with urllib.request.urlopen(req, context=ctx, timeout=60) as r:
+                      return json.load(r)
+
+
+              def main(out_path):
+                  n, cont = 0, None
+                  with open(out_path, "w") as f:
+                      f.write('{"apiVersion":"v1","kind":"List","metadata":{},"items":[\n')
+                      while True:
+                          q = "limit=%d" % PAGE + ("&continue=" + urllib.parse.quote(cont) if cont else "")
+                          page = api_get("/apis/aquasecurity.github.io/v1alpha1/sbomreports?" + q)
+                          for it in page.get("items", []):
+                              f.write(("," if n else "") + json.dumps(it, separators=(",", ":")) + "\n")
+                              n += 1
+                          cont = page.get("metadata", {}).get("continue")
+                          if not cont:
+                              break
+                      f.write("]}\n")
+                  if n == 0:
+                      sys.exit("no SbomReports found - refusing to publish an empty export")
+                  print("exported %d SbomReports to %s" % (n, out_path))
+
+
+              if __name__ == "__main__":
+                  if len(sys.argv) != 2:
+                      sys.exit("usage: sbom_export.py <sbomreports.json>")
+                  main(sys.argv[1])
+              PYEOF
+              python3 /tmp/sbom_export.py /tmp/sbomreports.json
+          command:
+            - /bin/sh
+            - '-c'
+          env:
+            - name: PYTHONDONTWRITEBYTECODE
+              value: '1'
+            - name: HOME
+              value: /tmp
+          image: >-
+            mirror.gcr.io/library/python@sha256:4c47124a8391cb7a9f571164147d154777cf012a4ece5f86097130d7a4478111
+          name: export-sbom
+          resources:
+            limits:
+              cpu: 300m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsGroup: 1001
+            runAsNonRoot: true
+            runAsUser: 1001
+            seccompProfile:
+              type: RuntimeDefault
+          volumeMounts:
+            - mountPath: /tmp
+              name: tmp
+      name: sbom-report
+      outputs:
+        artifacts:
+          - archive:
+              none: {}
+            name: sbomreports
+            path: /tmp/sbomreports.json
+            s3:
+              accessKeySecret:
+                key: TRIVY_BACKUP_ACCESS_KEY
+                name: minio-trivy-backup-credentials
+              bucket: trivy-reports
+              endpoint: minio.minio.svc.cluster.local:9000
+              insecure: true
+              key: >-
+                sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}.json
+              secretKeySecret:
+                key: TRIVY_BACKUP_SECRET_KEY
+                name: minio-trivy-backup-credentials
+          - archive:
+              none: {}
+            name: sbomreports-licences-html
+            path: /tmp/licences.html
+            s3:
+              accessKeySecret:
+                key: TRIVY_BACKUP_ACCESS_KEY
+                name: minio-trivy-backup-credentials
+              bucket: trivy-reports
+              endpoint: minio.minio.svc.cluster.local:9000
+              insecure: true
+              key: >-
+                sbomreports/{{workflow.creationTimestamp.Y}}-{{workflow.creationTimestamp.m}}-{{workflow.creationTimestamp.d}}/{{workflow.name}}-licences.html
+              secretKeySecret:
+                key: TRIVY_BACKUP_SECRET_KEY
+                name: minio-trivy-backup-credentials
       retryStrategy:
-        limit: "2"
+        limit: '2'
         retryPolicy: OnError
-  entrypoint: backup-all
-  arguments: {}
-  serviceAccountName: argo-workflow
   volumes:
-    - name: tmp
-      emptyDir:
-        sizeLimit: 128Mi
-  activeDeadlineSeconds: 600
-  podGC:
-    strategy: OnPodCompletion
-    deleteDelayDuration: 5m
+    - emptyDir:
+        sizeLimit: 512Mi
+      name: tmp
