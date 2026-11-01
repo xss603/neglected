@@ -1,0 +1,63 @@
+# Package Justification: `git-delta-0.20.1-1.el9.x86_64` vs `git-delta-0.10.1-7.el9.x86_64`
+
+## 1. Executive Summary
+
+| Attribute | `git-delta-0.10.1-7.el9` | `git-delta-0.20.1-1.el9` |
+| :--- | :--- | :--- |
+| **Availability in EPEL 9** | ❌ **Unavailable** (Purged from repository) |  **Available** (Current active release) |
+| **Package Manager Status** | Fails with `No package matches` | Installs cleanly via `microdnf` |
+| **Upstream Release Date** | ~2021 | Current active release |
+| **Security Posture** | Bundles outdated Rust dependencies | Contains current security & ABI updates |
+| **Modern Git Compatibility**| Limited (fails on newer git diff formats) | Full support for modern Git configurations |
+
+---
+
+## 2. Why `git-delta-0.10.1-7.el9` Fails to Install
+
+### EPEL 9 Rolling Lifecycle
+`git-delta` is hosted in **EPEL 9** (*Extra Packages for Enterprise Linux*), which does not keep old point releases once they are superseded. 
+
+* When EPEL maintainers pushed updates to `git-delta`, the legacy build `0.10.1-7.el9` was removed from the active repodata index.
+* Running `microdnf install git-delta-0.10.1-7.el9.x86_64` produces:
+  ```text
+  error: No package matches git-delta-0.10.1-7.el9.x86_64
+  ```
+* Attempting to keep the `0.10.1-7.el9` pin breaks automated CI/CD builds.
+
+---
+
+## 3. Technical Justifications for `0.20.1-1.el9`
+
+### A. Shared Library & ABI Compatibility
+`git-delta` dynamically links against system C libraries provided by EPEL and RHEL 9:
+* `libgit2` (linked to `libgit2_1.9`)
+* `libssh2` (`1.11.x`)
+* `oniguruma` (`6.9.x`)
+* `llhttp`
+
+The older `0.10.1` package was compiled against legacy library versions from 2021/2022. Forcing it into modern UBI 9 environments causes broken dynamic linker symbols (`libgit2.so` ABI mismatches). Version `0.20.1-1.el9` is compiled against current UBI9/EPEL9 shared libraries.
+
+### B. Security & CVE Mitigation
+`git-delta` is written in Rust and links against Git and regex parsing engines. Between `0.10.1` and `0.20.1`:
+* **Vulnerability Fixes**: Multiple vulnerabilities in underlying parsers, regular expression evaluation (`oniguruma`), and HTTP/SSH transport handling have been patched.
+* **Trivy / Scanner Compliance**: Using modern packages prevents vulnerability scanners (Trivy, Grype, Prisma) from flagging outdated embedded Rust dependencies.
+
+### C. Upstream Functional Fixes
+* **Modern Git Support**: Version `0.10.x` does not support several modern Git features introduced in Git 2.38+, such as updated merge conflict style (`zdiff3`) and multi-file diff handling.
+* **Performance**: Significant reductions in memory footprint and start-up latency when paging large diffs or commit graphs.
+
+---
+
+## 4. Conclusion & Recommendation
+
+* **Target Package**: `git-delta-0.20.1-1.el9`
+* **Implementation**:
+  ```dockerfile
+  RUN rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm \
+   && microdnf install -y --nodocs \
+        --setopt=install_weak_deps=0 \
+        --setopt=tsflags=nodocs \
+        git-delta-0.20.1-1.el9 \
+   && microdnf clean all \
+   && rm -rf /var/cache/dnf /var/cache/yum /var/lib/dnf
+  ```
